@@ -2,6 +2,9 @@ import gym
 from gym import spaces
 import numpy as np
 import pandas as pd
+from collections import deque
+import tensorflow as tf 
+
 
 class TradingEnvironment(gym.Env):
     def __init__(self, data):

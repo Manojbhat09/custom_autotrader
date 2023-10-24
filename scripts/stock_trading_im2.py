@@ -34,7 +34,7 @@ import itertools
 
 if_using_a2c = True
 if_using_ddpg = True
-if_using_ppo = True
+if_using_ppo = False
 if_using_td3 = True
 if_using_sac = True
 

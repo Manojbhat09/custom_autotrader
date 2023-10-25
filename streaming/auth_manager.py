@@ -1,6 +1,8 @@
 import streamlit as st
 import bcrypt
 import sqlite3
+import jwt
+
 
 class AuthManager:
     def __init__(self):
@@ -31,3 +33,16 @@ class AuthManager:
         else:
             st.sidebar.error("Invalid username or password.")
             return False
+
+
+def verify_token(token):
+    try:
+        # Decode the token
+        decoded = jwt.decode(token, 'random_secret_key', algorithms=['HS256'])
+        return decoded['user']
+    except jwt.ExpiredSignatureError:
+        st.error('Signature expired. Please log in again.')
+        return None
+    except jwt.InvalidTokenError:
+        st.error('Invalid token. Please log in again.')
+        return None

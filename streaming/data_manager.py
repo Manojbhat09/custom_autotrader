@@ -1,4 +1,5 @@
 import yfinance as yf
+import streamlit as st
 from bs4 import BeautifulSoup
 import requests
 import pandas as pd
@@ -6,6 +7,9 @@ from sklearn.linear_model import LinearRegression
 import numpy as np
 import plotly.graph_objects as go
 import sqlite3 
+
+def hash_sqlite3_connection(conn):
+    return id(conn)  # or some other way of uniquely identifying the connection objec
 
 class DataManager:
     def __init__(self, ticker, period='1d', interval='1m'):
@@ -32,6 +36,7 @@ class DataManager:
                           volume INTEGER)''')
         self.conn.commit()
 
+    @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_price_data_from_api(self):
         try:
             data = yf.Ticker(self.ticker).history(period=self.period, interval=self.interval)
@@ -51,6 +56,25 @@ class DataManager:
                            (self.ticker, index, row['Open'], row['High'], row['Low'], row['Close'], row['Volume']))
         self.conn.commit()
 
+    # def resample_data(self, data):
+    #     # Resample to a regular interval, say 1 minute
+    #     data_resampled = data.resample('1T').ohlc()  # '1T' denotes 1-minute intervals
+    #     # Forward-fill missing values
+    #     data_ffilled = data_resampled.ffill()
+    #     return data_ffilled
+
+    def filter_trading_hours(self, data):
+        # Convert the index to the local timezone (EST)
+        try:    
+            data.index = data.index.tz_convert('America/New_York')
+        except Exception as e:
+            print(e)
+            print("moving on")
+        # Filter the data for the trading hours
+        # data = data.between_time('09:30', '16:00')
+        return data
+    
+    @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_price_data(self):
         # Check if data already exists in the database
         self.c.execute('''SELECT * FROM stock_data WHERE ticker = ?''', (self.ticker,))
@@ -64,29 +88,35 @@ class DataManager:
             # Fetch data from yfinance if not in database
             data = self.get_price_data_from_api()
             if data is not None and self.validate_data(data):
+                # data = self.resample_data(data)
                 # Save new data to database
-                self.save_to_db(data)
+                data = self.filter_trading_hours(data)
+                # self.save_to_db(data)
                 return data
             else:
                 print("Failed to retrieve or validate data.")
                 return None
-
+    
+    @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def update_data(self):
         new_data = self.get_price_data_from_api()
         if new_data is not None and self.validate_data(new_data):
-            self.save_to_db(new_data)
+            # self.save_to_db(new_data)
             self.data = new_data
-        
+
+    @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_moving_average(self, window):
         return self.data['Close'].rolling(window=window).mean()
-        
+    
+    @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_RSI(self, window):
         delta = self.data['Close'].diff(1)
         gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
         rs = gain / loss
         return 100 - (100 / (1 + rs))
-        
+    
+    @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_MACD(self):
         exp12 = self.data['Close'].ewm(span=12, adjust=False).mean()
         exp26 = self.data['Close'].ewm(span=26, adjust=False).mean()

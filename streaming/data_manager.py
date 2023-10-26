@@ -7,6 +7,7 @@ from sklearn.linear_model import LinearRegression
 import numpy as np
 import plotly.graph_objects as go
 import sqlite3 
+import random
 
 def hash_sqlite3_connection(conn):
     return id(conn)  # or some other way of uniquely identifying the connection objec
@@ -35,6 +36,11 @@ class DataManager:
                           close REAL,
                           volume INTEGER)''')
         self.conn.commit()
+
+    
+    def random_color(self):
+        return f'rgb({random.randint(0, 255)}, {random.randint(0, 255)}, {random.randint(0, 255)})'
+
 
     @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_price_data_from_api(self):
@@ -159,6 +165,234 @@ class DataManager:
             margin=dict(l=10, r=10, t=30, b=10)
         )
         return fig
+    
+    def plot_macd(self, ticker, fig, row_idx):
+        macd_data, signal_data = self.data.get_MACD()
+        # fig.add_trace(go.Scatter(x=macd_data.index, y=macd_data, mode='lines', name=f'{ticker} MACD'), row=row_idx, col=2)
+        # fig.add_trace(go.Scatter(x=signal_data.index, y=signal_data, mode='lines', name=f'{ticker} Signal Line'), row=row_idx, col=2)
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(len(macd_data))),
+                y=macd_data,
+                customdata=macd_data.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                line=dict(color=self.random_color()),
+                mode='lines',
+                name=f'{ticker} MACD'
+            ),
+            row=row_idx,
+            col=2
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(len(signal_data))),
+                y=signal_data,
+                customdata=signal_data.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                line=dict(color=self.random_color()),
+                mode='lines',
+                name=f'{ticker} Signal Line'
+            ),
+            row=row_idx,
+            col=2
+        )
+    
+    def plot_rsi(self, ticker, fig, row_idx):
+        rsi_data = self.data.get_RSI(14)
+        # fig.add_trace(go.Scatter(x=rsi_data.index, y=rsi_data, mode='lines', name=f'{ticker} RSI'), row=row_idx, col=2)
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(len(rsi_data))),
+                y=rsi_data,
+                customdata=rsi_data.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                line=dict(color=self.random_color()),
+                mode='lines',
+                name=f'{ticker} RSI'
+            ),
+            row=row_idx,
+            col=2
+        )
+
+    def plot_price_ma(self, ticker, price_data, fig, row_idx): 
+        ma_data = self.get_moving_average(20)
+        fig.add_trace(
+                go.Scatter(
+                    x=list(range(len(price_data))),
+                    y=price_data['Close'],
+                    customdata=price_data.index,
+                    hovertemplate='%{customdata}: %{y}<extra></extra>',
+                    line=dict(color=self.random_color()),
+                    mode='lines',
+                    name=f'{ticker} Price'
+                ),
+                row=row_idx,
+                col=1
+            )
+        fig.add_trace(
+                go.Scatter(
+                    x=list(range(len(ma_data))),
+                    y=ma_data,
+                    customdata=ma_data.index,
+                    hovertemplate='%{customdata}: %{y}<extra></extra>',
+                    line=dict(color=self.random_color()),
+                    mode='lines',
+                    name=f'{ticker} 20-day MA'
+                ),
+                row=row_idx,
+                col=1
+            )
+
+    # Function to plot Bollinger Bands
+    def plot_bollinger_bands(self, ticker, df, fig, row_idx = 0):
+        window = 20
+        df['Middle Band'] = df['Close'].rolling(window).mean()
+        df['Upper Band'] = df['Middle Band'] + 1.96*df['Close'].rolling(window).std()
+        df['Lower Band'] = df['Middle Band'] - 1.96*df['Close'].rolling(window).std()
+        x_indices = list(range(len(df)))
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=df['Upper Band'],
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                line=dict(color=self.random_color()),
+                name='Upper Band'
+            ),
+            row=row_idx,
+            col=2
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=df['Middle Band'],
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                name='Middle Band'
+            ),
+            row=row_idx,
+            col=2
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=df['Lower Band'],
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                name='Lower Band'
+            ),
+            row=row_idx,
+            col=2
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=df['Close'],
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                name='Close Price'
+            ),
+            row=row_idx,
+            col=2
+        )
+
+
+    # Function to plot Fibonacci Retracements
+    def plot_fibonacci_retracements(self, ticker, df, fig, row_idx=0):
+        peak = df['Close'].max()
+        trough = df['Close'].min()
+        levels = [0, 0.236, 0.382, 0.5, 0.618, 1]
+        fibs = [(peak - trough) * level + trough for level in levels]
+        x_indices = list(range(len(df)))
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=df['Close'],
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                name='Close Price'
+            ),
+            row=row_idx,
+            col=2
+        )
+        for level, fib in zip(levels, fibs):
+            fig.add_hline(
+                y=fib,
+                line_dash="dash",
+                annotation_text=f'Fib {level}',
+                row=row_idx,
+                col=2
+            )
+
+
+
+    # Function to plot Ichimoku Cloud
+    def plot_ichimoku_cloud(self,ticker, df, fig, row_idx=0):
+        highs = df['High']
+        lows = df['Low']
+        tenkan_sen = (highs.rolling(window=9).max() + lows.rolling(window=9).min()) / 2
+        kijun_sen = (highs.rolling(window=26).max() + lows.rolling(window=26).min()) / 2
+        senkou_span_a = (tenkan_sen + kijun_sen) / 2
+        senkou_span_b = (highs.rolling(window=52).max() + lows.rolling(window=52).min()) / 2
+        chikou_span = df['Close'].shift(-26)
+
+        x_indices = list(range(len(df)))
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=tenkan_sen,
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                name='Tenkan-sen'
+            ),
+            row=row_idx,
+            col=2
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=kijun_sen,
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                name='Kijun-sen'
+            ),
+            row=row_idx,
+            col=2
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=senkou_span_a,
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                name='Senkou Span A'
+            ),
+            row=row_idx,
+            col=2
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=senkou_span_b,
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                name='Senkou Span B'
+            ),
+            row=row_idx,
+            col=2
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=chikou_span,
+                customdata=df.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                name='Chikou Span'
+            ),
+            row=row_idx,
+            col=2
+        )
+
 
 # Usage:
 dm = DataManager('AAPL')

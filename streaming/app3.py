@@ -1,4 +1,5 @@
 from robinhood_manager import RobinhoodManager
+import matplotlib.pyplot as plt
 import streamlit as st
 st.set_page_config(page_title="Login", layout='wide')
 from data_manager import DataManager
@@ -13,12 +14,15 @@ auth = AuthManager()
 tickers = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'FB', 'TSLA', 'NFLX', 'SPY', 'BA']  # Your list of tickers
 time_frame = st.sidebar.selectbox("Select Time Frame", ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'])
 interval = st.sidebar.selectbox("Select Interval", ['1m', '5m', '15m', '30m', '60m', '1d'])
-additional_indicator = st.sidebar.selectbox("Select Additional Indicator", ['None', 'RSI', 'MACD', 'Other'])
-
+indicators = st.sidebar.write("Addtional Indicators")
+# additional_indicator = st.sidebar.selectbox("Select Additional Indicator", ['None', 'RSI', 'MACD', 'Other'])
+rsi_selected = st.sidebar.checkbox('RSI')
+macd_selected = st.sidebar.checkbox('MACD')
+bollinger_bands_selected = st.sidebar.checkbox('Bollinger Bands')  # Added as an example
+fibonacci_retracements_selected = st.sidebar.checkbox('Fibonacci Retracements')  # Added as an example
+ichimoku_cloud_selected = st.sidebar.checkbox('Ichimoku Cloud')  # Added as an example
 robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MENkeys796@09')
 
-def random_color():
-    return f'rgb({random.randint(0, 255)}, {random.randint(0, 255)}, {random.randint(0, 255)})'
 
 def get_robinhood_ticker_lists():
 
@@ -78,105 +82,46 @@ def display_dashboard():
     selected_list = st.sidebar.selectbox("Select Ticker List", list(ticker_lists.keys()))
     tickers = ticker_lists[selected_list]
 
+     # Pagination logic
+    num_plots_perpage = 4
+    page = st.sidebar.slider('Page:', 1, (len(tickers) + 2) // num_plots_perpage)
+    start_idx = (page - 1) * num_plots_perpage
+    end_idx = min(start_idx + num_plots_perpage, len(tickers))
+    num_plots_perpage = end_idx - start_idx
+
     subplot_titles = []
-    for ticker in tickers:
+    for ticker in tickers[start_idx:end_idx]:
         subplot_titles.extend([f"{ticker}_Price", f"{ticker}_aIndicator"])
 
     fig = sp.make_subplots(
-        rows=len(tickers), cols=2,
+        rows=num_plots_perpage, cols=2,
         shared_xaxes=True,
         vertical_spacing=0.05,
         subplot_titles=subplot_titles
     )
 
-    for i, ticker in enumerate(tickers):
+    for i, ticker in enumerate(tickers[start_idx:end_idx]):
         data = DataManager(ticker, time_frame, interval)
         price_data = data.get_price_data()
-        ma_data = data.get_moving_average(20)
-        rsi_data = data.get_RSI(14)
-        macd_data, signal_data = data.get_MACD()
-
         row_idx = i + 1  # Adjusting for 1-based index
 
         # Price and Moving Average
-        fig.add_trace(
-                go.Scatter(
-                    x=list(range(len(price_data))),
-                    y=price_data['Close'],
-                    customdata=price_data.index,
-                    hovertemplate='%{customdata}: %{y}<extra></extra>',
-                    line=dict(color=random_color()),
-                    mode='lines',
-                    name=f'{ticker} Price'
-                ),
-                row=row_idx,
-                col=1
-            )
-        fig.add_trace(
-                go.Scatter(
-                    x=list(range(len(ma_data))),
-                    y=ma_data,
-                    customdata=ma_data.index,
-                    hovertemplate='%{customdata}: %{y}<extra></extra>',
-                    line=dict(color=random_color()),
-                    mode='lines',
-                    name=f'{ticker} 20-day MA'
-                ),
-                row=row_idx,
-                col=1
-            )
-        # fig.add_trace(go.Scatter(x=list(range(len(price_data))), y=price_data['Close'], mode='lines', name=f'{ticker} Price'), row=row_idx, col=1)
-        # fig.add_trace(go.Scatter(x=list(range(len(price_data))) , y=ma_data, mode='lines', name=f'{ticker} 20-day MA'), row=row_idx, col=1)
+        data.plot_price_ma(ticker, price_data, fig, row_idx)
 
         # Additional Indicators
-        if additional_indicator == 'RSI':
-            # fig.add_trace(go.Scatter(x=rsi_data.index, y=rsi_data, mode='lines', name=f'{ticker} RSI'), row=row_idx, col=2)
-            fig.add_trace(
-                go.Scatter(
-                    x=list(range(len(rsi_data))),
-                    y=rsi_data,
-                    customdata=rsi_data.index,
-                    hovertemplate='%{customdata}: %{y}<extra></extra>',
-                    line=dict(color=random_color()),
-                    mode='lines',
-                    name=f'{ticker} RSI'
-                ),
-                row=row_idx,
-                col=2
-            )
-        elif additional_indicator == 'MACD':
-            macd_data, signal_data = data.get_MACD()
-            # fig.add_trace(go.Scatter(x=macd_data.index, y=macd_data, mode='lines', name=f'{ticker} MACD'), row=row_idx, col=2)
-            # fig.add_trace(go.Scatter(x=signal_data.index, y=signal_data, mode='lines', name=f'{ticker} Signal Line'), row=row_idx, col=2)
-            fig.add_trace(
-                go.Scatter(
-                    x=list(range(len(macd_data))),
-                    y=macd_data,
-                    customdata=macd_data.index,
-                    hovertemplate='%{customdata}: %{y}<extra></extra>',
-                    line=dict(color=random_color()),
-                    mode='lines',
-                    name=f'{ticker} MACD'
-                ),
-                row=row_idx,
-                col=2
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=list(range(len(signal_data))),
-                    y=signal_data,
-                    customdata=signal_data.index,
-                    hovertemplate='%{customdata}: %{y}<extra></extra>',
-                    line=dict(color=random_color()),
-                    mode='lines',
-                    name=f'{ticker} Signal Line'
-                ),
-                row=row_idx,
-                col=2
-            )
+        if rsi_selected: # additional_indicator
+            data.plot_rsi(ticker, fig, row_idx)
+        if macd_selected:
+            data.plot_macd(ticker, fig, row_idx)
+        if bollinger_bands_selected:
+            data.plot_bollinger_bands(ticker, price_data, fig, row_idx)
+        if fibonacci_retracements_selected:
+            data.plot_fibonacci_retracements(ticker, price_data, fig, row_idx)
+        if ichimoku_cloud_selected:
+            data.plot_ichimoku_cloud(ticker, price_data, fig, row_idx)
 
     fig.update_layout(
-        height=600*len(tickers),  # Adjust height to accommodate the number of tickers
+        height=300*num_plots_perpage,  # Adjust height to accommodate the number of tickers
         title_text="Multi-Ticker Analysis",
         #showlegend=True
     )
@@ -193,13 +138,12 @@ def display_dashboard():
         """, unsafe_allow_html=True)
         # st.plotly_chart(fig, use_container_width=True)
         # Display the plot
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, height=1100)
 
 # Main App
 # def main():
 #     
-    
-
+ 
 def main():
     query_params = st.experimental_get_query_params()
     token = query_params.get("token", None)
@@ -216,3 +160,35 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+'''
+
+    # Create a figure with subplots
+    fig, axs = plt.subplots(len(tickers), 2, figsize=(10, 5 * len(tickers)))
+
+    for i, ticker in enumerate(tickers):
+        # Assume price_data and ma_data are obtained for the current ticker
+        data = DataManager(ticker, time_frame, interval)
+        price_data = data.get_price_data()  # Example function to get data
+        ma_data = data.get_moving_average(20)  # Example function to get data
+
+        # Price and Moving Average
+        axs[i, 0].plot(price_data.index, price_data['Close'], label=f'{ticker} Price')
+        axs[i, 0].plot(ma_data.index, ma_data, label=f'{ticker} 20-day MA')
+        axs[i, 0].legend()
+        axs[i, 0].set_title(f'{ticker} Price and Moving Average')
+
+        # Additional Indicator (e.g., RSI)
+        rsi_data = data.get_RSI(14)  # Example function to get data
+        axs[i, 1].plot(rsi_data.index, rsi_data, label=f'{ticker} RSI')
+        axs[i, 1].legend()
+        axs[i, 1].set_title(f'{ticker} RSI')
+
+    # Adjust spacing between subplots
+    plt.tight_layout()
+
+    # Display the figure in Streamlit
+    st.pyplot(fig)
+
+
+'''

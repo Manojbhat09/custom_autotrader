@@ -9,9 +9,8 @@ from finrl.agents.elegantrl.models import DRLAgent
 from finrl.plot import backtest_stats, backtest_plot, get_daily_return, get_baseline
 # from finrl.trade.backtest import backtest_stats, backtest_plot, get_daily_return, get_baseline
 
-df = YahooDownloader(start_date = '2009-01-01',
-                     end_date = '2021-01-01',
-                     ticker_list = ['AAPL']).fetch_data()
+import pdb; pdb.set_trace()
+df = YahooDownloader(start_date = '2009-01-01',end_date = '2021-01-01',ticker_list = ['ETH/USD']).fetch_data()
 
 fe = FeatureEngineer(
         use_technical_indicator=True,

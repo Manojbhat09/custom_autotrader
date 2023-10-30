@@ -1,0 +1,451 @@
+File: /home/mbhat/tradebot/custom_autotrader/scripts/../streaming/app3.py
+========================================
+import streamlit as st
+st.set_page_config(page_title="Login", layout="wide")
+from data_manager import DataManager
+from auth_manager import AuthManager, verify_token
+import plotly.subplots as sp
+import plotly.graph_objects as go
+import random
+
+
+auth = AuthManager()
+tickers = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'FB', 'TSLA', 'NFLX', 'SPY', 'BA']  # Your list of tickers
+time_frame = st.sidebar.selectbox("Select Time Frame", ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'])
+interval = st.sidebar.selectbox("Select Interval", ['1m', '5m', '15m', '30m', '60m', '1d'])
+additional_indicator = st.sidebar.selectbox("Select Additional Indicator", ['None', 'RSI', 'MACD', 'Other'])
+ticker_lists = {
+        'List 1': ['AAPL', 'GOOGL', 'MSFT'],
+        'List 2': ['AMZN', 'FB', 'TSLA'],
+        # ... add up to 20 lists ...
+    }
+
+def random_color():
+    return f'rgb({random.randint(0, 255)}, {random.randint(0, 255)}, {random.randint(0, 255)})'
+
+def display_login_page():
+    st.sidebar.title("User Authentication")
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    login_button = st.sidebar.button("Login")
+    register_button = st.sidebar.button("Register")
+    google_login_button = st.sidebar.button("Login with Google")  # Add this line
+    
+    if login_button:
+        if auth.login(username, password):
+            st.session_state['logged_in'] = True
+            display_dashboard()
+        else:
+            st.sidebar.error("Invalid username or password.")
+    if register_button:
+        auth.register(username, password)
+        st.sidebar.success("Registered successfully.")
+    if google_login_button:  # Add this block
+        st.write("Redirecting to Google login...")
+        # Assuming your Flask app is running on http://localhost:5000
+        flask_login_url = "http://localhost:5000/login/google"
+        st.markdown(f'<meta http-equiv="refresh" content="0;url={flask_login_url}">', unsafe_allow_html=True)
+        st.write("Redirecting...")
+        # st.redirect(flask_login_url)
+
+# Function to display the dashboard
+def display_dashboard():
+    selected_list = st.sidebar.selectbox("Select Ticker List", list(ticker_lists.keys()))
+    tickers = ticker_lists[selected_list]
+
+    subplot_titles = []
+    for ticker in tickers:
+        subplot_titles.extend([f"{ticker}_Price", f"{ticker}_aIndicator"])
+
+    fig = sp.make_subplots(
+        rows=len(tickers), cols=2,
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        subplot_titles=subplot_titles
+    )
+
+    for i, ticker in enumerate(tickers):
+        data = DataManager(ticker, time_frame, interval)
+        price_data = data.get_price_data()
+        ma_data = data.get_moving_average(20)
+        rsi_data = data.get_RSI(14)
+        macd_data, signal_data = data.get_MACD()
+
+        row_idx = i + 1  # Adjusting for 1-based index
+
+        # Price and Moving Average
+        fig.add_trace(
+                go.Scatter(
+                    x=list(range(len(price_data))),
+                    y=price_data['Close'],
+                    customdata=price_data.index,
+                    hovertemplate='%{customdata}: %{y}<extra></extra>',
+                    line=dict(color=random_color()),
+                    mode='lines',
+                    name=f'{ticker} Price'
+                ),
+                row=row_idx,
+                col=1
+            )
+        fig.add_trace(
+                go.Scatter(
+                    x=list(range(len(ma_data))),
+                    y=ma_data,
+                    customdata=ma_data.index,
+                    hovertemplate='%{customdata}: %{y}<extra></extra>',
+                    line=dict(color=random_color()),
+                    mode='lines',
+                    name=f'{ticker} 20-day MA'
+                ),
+                row=row_idx,
+                col=1
+            )
+        # fig.add_trace(go.Scatter(x=list(range(len(price_data))), y=price_data['Close'], mode='lines', name=f'{ticker} Price'), row=row_idx, col=1)
+        # fig.add_trace(go.Scatter(x=list(range(len(price_data))) , y=ma_data, mode='lines', name=f'{ticker} 20-day MA'), row=row_idx, col=1)
+
+        # Additional Indicators
+        if additional_indicator == 'RSI':
+            # fig.add_trace(go.Scatter(x=rsi_data.index, y=rsi_data, mode='lines', name=f'{ticker} RSI'), row=row_idx, col=2)
+            fig.add_trace(
+                go.Scatter(
+                    x=list(range(len(rsi_data))),
+                    y=rsi_data,
+                    customdata=rsi_data.index,
+                    hovertemplate='%{customdata}: %{y}<extra></extra>',
+                    line=dict(color=random_color()),
+                    mode='lines',
+                    name=f'{ticker} RSI'
+                ),
+                row=row_idx,
+                col=2
+            )
+        elif additional_indicator == 'MACD':
+            macd_data, signal_data = data.get_MACD()
+            # fig.add_trace(go.Scatter(x=macd_data.index, y=macd_data, mode='lines', name=f'{ticker} MACD'), row=row_idx, col=2)
+            # fig.add_trace(go.Scatter(x=signal_data.index, y=signal_data, mode='lines', name=f'{ticker} Signal Line'), row=row_idx, col=2)
+            fig.add_trace(
+                go.Scatter(
+                    x=list(range(len(macd_data))),
+                    y=macd_data,
+                    customdata=macd_data.index,
+                    hovertemplate='%{customdata}: %{y}<extra></extra>',
+                    line=dict(color=random_color()),
+                    mode='lines',
+                    name=f'{ticker} MACD'
+                ),
+                row=row_idx,
+                col=2
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=list(range(len(signal_data))),
+                    y=signal_data,
+                    customdata=signal_data.index,
+                    hovertemplate='%{customdata}: %{y}<extra></extra>',
+                    line=dict(color=random_color()),
+                    mode='lines',
+                    name=f'{ticker} Signal Line'
+                ),
+                row=row_idx,
+                col=2
+            )
+
+    fig.update_layout(
+        height=300*len(tickers),  # Adjust height to accommodate the number of tickers
+        title_text="Multi-Ticker Analysis",
+        showlegend=True
+    )
+
+    # Display the plot
+    st.plotly_chart(fig, use_container_width=True)
+
+# Main App
+# def main():
+#     st.title("Advanced Trading Dashboard")
+#     if 'logged_in' in st.session_state and st.session_state['logged_in']:
+#         display_dashboard()
+#     else:
+#         display_login_page()
+
+def main():
+    query_params = st.experimental_get_query_params()
+    token = query_params.get("token", None)
+    if token and verify_token(token):
+        display_dashboard()
+    else:
+        st.write("Please login to access the dashboard.")
+        display_login_page()
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+File: /home/mbhat/tradebot/custom_autotrader/scripts/../streaming/auth_manager.py
+========================================
+import streamlit as st
+import bcrypt
+import sqlite3
+import jwt
+
+class AuthManager:
+    def __init__(self):
+        self.conn = sqlite3.connect('users.db', check_same_thread=False)  # Disabling check_same_thread for simplicity
+        self.c = self.conn.cursor()
+        self.c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT, password TEXT)''')
+        self.conn.commit()
+        
+    def register(self, username, password):
+        self.c.execute('''SELECT * FROM users WHERE username = ?''', (username,))
+        if self.c.fetchone() is not None:
+            st.sidebar.error("Username already exists.")
+            return
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        self.c.execute('''INSERT INTO users (username, password) VALUES (?, ?)''', (username, hashed_password))
+        self.conn.commit()
+        st.sidebar.success("Registered successfully.")
+        
+    def login(self, username, password):
+        self.c.execute('''SELECT * FROM users WHERE username = ?''', (username,))
+        user = self.c.fetchone()
+        if user is None:
+            st.sidebar.error("Invalid username or password.")
+            return False
+        if bcrypt.checkpw(password.encode('utf-8'), user[1]):
+            st.sidebar.success("Logged in successfully.")
+            return True
+        else:
+            st.sidebar.error("Invalid username or password.")
+            return False
+
+
+def verify_token(token):
+    try:
+        # Decode the token
+        decoded = jwt.decode(token, 'random_secret_key', algorithms=['HS256'])
+        return decoded['user']
+    except jwt.ExpiredSignatureError:
+        st.error('Signature expired. Please log in again.')
+        return None
+    except jwt.InvalidTokenError:
+        st.error('Invalid token. Please log in again.')
+        return None
+
+File: /home/mbhat/tradebot/custom_autotrader/scripts/../streaming/data_manager.py
+========================================
+import yfinance as yf
+from bs4 import BeautifulSoup
+import requests
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+import numpy as np
+import plotly.graph_objects as go
+import sqlite3 
+
+class DataManager:
+    def __init__(self, ticker, period='1d', interval='1m'):
+        self.ticker = ticker
+        self.period = period
+        self.interval = interval
+        self.conn = sqlite3.connect('stock_data.db')  # Connect to the database
+        self.c = self.conn.cursor()
+        self.create_table()
+        self.data = self.get_price_data()
+
+    def __del__(self):
+        self.conn.close()  # Close the database connection when DataManager is destroyed
+
+    def create_table(self):
+        self.c.execute('''CREATE TABLE IF NOT EXISTS stock_data (
+                          id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          ticker TEXT,
+                          timestamp TEXT,
+                          open REAL,
+                          high REAL,
+                          low REAL,
+                          close REAL,
+                          volume INTEGER)''')
+        self.conn.commit()
+
+    def get_price_data_from_api(self):
+        try:
+            data = yf.Ticker(self.ticker).history(period=self.period, interval=self.interval)
+            return data
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return None
+
+    def validate_data(self, data):
+        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        return all(col in data.columns for col in required_cols)
+
+    def save_to_db(self, data):
+        for index, row in data.iterrows():
+            self.c.execute('''INSERT INTO stock_data (ticker, timestamp, open, high, low, close, volume)
+                              VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                           (self.ticker, index, row['Open'], row['High'], row['Low'], row['Close'], row['Volume']))
+        self.conn.commit()
+
+    # def resample_data(self, data):
+    #     # Resample to a regular interval, say 1 minute
+    #     data_resampled = data.resample('1T').ohlc()  # '1T' denotes 1-minute intervals
+    #     # Forward-fill missing values
+    #     data_ffilled = data_resampled.ffill()
+    #     return data_ffilled
+
+    def filter_trading_hours(self, data):
+        # Convert the index to the local timezone (EST)
+        try:    
+            data.index = data.index.tz_convert('America/New_York')
+        except Exception as e:
+            print(e)
+            print("moving on")
+        # Filter the data for the trading hours
+        # data = data.between_time('09:30', '16:00')
+        return data
+        
+    def get_price_data(self):
+        # Check if data already exists in the database
+        self.c.execute('''SELECT * FROM stock_data WHERE ticker = ?''', (self.ticker,))
+        data = self.c.fetchall()
+        if data:
+            # Load data from database if it exists
+            columns = ['id', 'ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
+            df = pd.DataFrame(data, columns=columns).set_index('timestamp')
+            return df.drop(columns=['id', 'ticker'])
+        else:
+            # Fetch data from yfinance if not in database
+            data = self.get_price_data_from_api()
+            if data is not None and self.validate_data(data):
+                # data = self.resample_data(data)
+                # Save new data to database
+                data = self.filter_trading_hours(data)
+                # self.save_to_db(data)
+                return data
+            else:
+                print("Failed to retrieve or validate data.")
+                return None
+
+    def update_data(self):
+        new_data = self.get_price_data_from_api()
+        if new_data is not None and self.validate_data(new_data):
+            # self.save_to_db(new_data)
+            self.data = new_data
+        
+    def get_moving_average(self, window):
+        return self.data['Close'].rolling(window=window).mean()
+        
+    def get_RSI(self, window):
+        delta = self.data['Close'].diff(1)
+        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+        rs = gain / loss
+        return 100 - (100 / (1 + rs))
+        
+    def get_MACD(self):
+        exp12 = self.data['Close'].ewm(span=12, adjust=False).mean()
+        exp26 = self.data['Close'].ewm(span=26, adjust=False).mean()
+        macd = exp12 - exp26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        return macd, signal
+    
+    def predict_prices(self):
+        model = LinearRegression()
+        X = np.array(range(len(self.data))).reshape(-1, 1)
+        y = self.data['Close'].values
+        model.fit(X, y)
+        future_X = np.array(range(len(self.data), len(self.data) + 5)).reshape(-1, 1)
+        return model.predict(future_X)
+    
+    def plot_price_data(self):
+        fig = go.Figure(data=[go.Candlestick(x=self.data.index,
+                open=self.data['Open'],
+                high=self.data['High'],
+                low=self.data['Low'],
+                close=self.data['Close'])])
+        fig.update_layout(
+            title='Price Data',
+            xaxis_title='Date',
+            yaxis_title='Price',
+            template='plotly_dark',
+            margin=dict(l=10, r=10, t=30, b=10)
+        )
+        fig.update_xaxes(rangeslider_visible=True)
+        return fig
+
+    def plot_moving_average(self, window):
+        ma = self.data['Close'].rolling(window=window).mean()
+        fig = go.Figure(data=[go.Scatter(x=self.data.index, y=ma, mode='lines', name='MA')])
+        fig.update_layout(
+            title=f'Moving Average (Window: {window})',
+            xaxis_title='Date',
+            yaxis_title='Price',
+            template='plotly_dark',
+            margin=dict(l=10, r=10, t=30, b=10)
+        )
+        return fig
+
+# Usage:
+dm = DataManager('AAPL')
+dm.update_data()  # Call this method to update data
+
+File: /home/mbhat/tradebot/custom_autotrader/scripts/../streaming/login_app/app.py
+========================================
+from flask import Flask, redirect, url_for
+from flask_dance.contrib.google import make_google_blueprint, google
+import jwt
+app = Flask(__name__)
+app.secret_key = 'random_secret_key'
+blueprint = make_google_blueprint(client_id="293772337596-pb4g8lfra73eu2ila07j1gvsa469t06k.apps.googleusercontent.com", client_secret="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", redirect_to="https://aba1-49-43-26-171.ngrok-free.app/redirect_to_streamlit" )#"google_login")
+app.register_blueprint(blueprint, url_prefix="/login")
+
+@app.route("/redirect_to_streamlit")
+def redirect_to_streamlit():
+    if not google.authorized:
+        return redirect(url_for("google.login"))
+    resp = google.get("/plus/v1/people/me")
+    assert resp.ok, resp.text
+    email = resp.json()["emails"][0]["value"]
+    # Create a token
+    token = jwt.encode({'user': email}, app.secret_key, algorithm='HS256')
+    # Redirect to Streamlit app with token
+    return redirect(f"http://localhost:8501?token={token}")
+
+
+@app.route('/')
+def index():
+    if not google.authorized:
+        return redirect(url_for("google.login"))
+    resp = google.get("/plus/v1/people/me")
+    assert resp.ok, resp.text
+    return "You are {email} on Google".format(email=resp.json()["emails"][0]["value"])
+
+
+# from login_app.app import app 
+
+# The URL you obtained from ngrok
+public_url = 'https://aba1-49-43-26-171.ngrok.io'
+
+# Update the Flask app to use the public URL
+app.config['BASE_URL'] = public_url
+
+if __name__ == '__main__':
+    app.run()
+
+File: /home/mbhat/tradebot/custom_autotrader/scripts/../streaming/ngrok_script.py
+========================================
+
+from pyngrok import ngrok
+from login_app.app import app 
+
+# Open a HTTP tunnel on the default port 80
+public_url = ngrok.connect(port=5000)
+import pdb; pdb.set_trace()
+# Update the Flask app to use the public URL
+app.config['BASE_URL'] = public_url
+
+# Now run the app
+if __name__ == '__main__':
+    app.run()
+

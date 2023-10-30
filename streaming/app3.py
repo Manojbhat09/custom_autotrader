@@ -8,6 +8,7 @@ import plotly.subplots as sp
 import plotly.graph_objects as go
 import numpy as np
 import random
+import time
 
 
 auth = AuthManager()
@@ -22,7 +23,6 @@ bollinger_bands_selected = st.sidebar.checkbox('Bollinger Bands')  # Added as an
 fibonacci_retracements_selected = st.sidebar.checkbox('Fibonacci Retracements')  # Added as an example
 ichimoku_cloud_selected = st.sidebar.checkbox('Ichimoku Cloud')  # Added as an example
 robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MENkeys796@09')
-
 
 def get_robinhood_ticker_lists():
 
@@ -50,7 +50,6 @@ def display_login_page():
             st.session_state['logged_in'] = True
             st.session_state['robinhood_manager'] = robinhood_manager
             display_dashboard()
-            
         else:
             st.sidebar.error("Invalid username or password.")
     if register_button:
@@ -65,9 +64,8 @@ def display_login_page():
         # st.redirect(flask_login_url)
         st.session_state['robinhood_manager'] = robinhood_manager
 
-# Function to display the dashboard
-def display_dashboard():
-    st.title("Advanced Trading Dashboard")
+def display_main_plotting_page():
+
     ticker_lists = {
         'List 1': ['AAPL', 'GOOGL', 'MSFT'],
         'List 2': ['AMZN', 'FB', 'TSLA'],
@@ -140,10 +138,80 @@ def display_dashboard():
         # Display the plot
         st.plotly_chart(fig, use_container_width=True, height=1100)
 
-# Main App
-# def main():
-#     
- 
+# Define a function to get option data from Robinhood
+@st.cache(ttl=120)  # Cache the data for 5 minutes
+def get_option_data():
+    option_info = robinhood_manager.get_option_instrument_info('YOUR_OPTION_URL_HERE')
+    return option_info
+
+def display_option_details_page():
+    st.title("Option Details Page")
+    option_placeholder = st.empty()  # Create a placeholder for option details
+    update_button = st.button("Stop Updates")
+    option_info_list = []
+    while not update_button:
+        start_time = time.time()    
+        option_positions_data = robinhood_manager.get_my_option_positions()
+        num_options = len(option_positions_data)
+        num_columns = 3  # Number of columns for displaying options
+        columns = st.columns(num_columns)
+        
+        # with st.progress(0) as progress_bar:
+        with st.empty() as progress_bar_placeholder,st.empty() as table_placeholder:
+            for i, option_data in enumerate(option_positions_data[:5]):
+                option_url = option_data['option']
+                option_instrument_info = robinhood_manager.get_option_instrument_info(option_url)
+                
+                # # Calculate the column index and row index for displaying options
+                # col_idx = i % num_columns
+                # row_idx = i // num_columns
+                option_info = {
+                    "Option": f"Option {i + 1}",
+                    "Chain Symbol": option_instrument_info['chain_symbol'],
+                    "Expiration Date": option_instrument_info['expiration_date'],
+                    "Strike Price": f"${option_instrument_info['strike_price']}",
+                    "Option Type": option_instrument_info['type'].capitalize()
+                }
+                
+                option_info_list.append(option_info)
+                st.write(option_info)
+                # Update progress bar
+                progress = (i + 1) / num_options
+                st.write(f"Progress: {int(progress * 100)}%")
+
+                # progress_bar.progress(progress)
+                 # Update the table
+                 # Update the table
+                 # Display option information in a tabular format
+                st.table(option_info_list)
+
+        st.subheader("Option Information:")
+        end_time = time.time()  # Record the end time
+        latency = end_time - start_time  # Calculate the time taken
+        st.write(f"Time taken to fetch and display option data: {latency:.2f} seconds")
+        
+        # Update option details every 2 minutes
+        # time.sleep(120)
+        update_button = st.button("Stop Updates")  # Check if the stop button is clicked
+
+# Function to display the dashboard
+def display_dashboard():
+    st.title("Advanced Trading Dashboard")
+
+    # Create a navigation menu to switch between pages
+    pages = ["Main Plotting Page", "Option Details Page", "Options List Page"]
+    selected_page = st.sidebar.selectbox("Select a Page", pages)
+
+    if selected_page == "Main Plotting Page":
+        # Display the main plotting page
+        display_main_plotting_page()
+    elif selected_page == "Option Details Page":
+        # Display the option details page
+        display_option_details_page()
+    elif selected_page == "Option List Page":
+        # Display the option details page
+        display_option_details_page()
+
 def main():
     query_params = st.experimental_get_query_params()
     token = query_params.get("token", None)
@@ -161,34 +229,34 @@ if __name__ == "__main__":
     main()
 
 
-'''
+# '''
 
-    # Create a figure with subplots
-    fig, axs = plt.subplots(len(tickers), 2, figsize=(10, 5 * len(tickers)))
+#     # Create a figure with subplots
+#     fig, axs = plt.subplots(len(tickers), 2, figsize=(10, 5 * len(tickers)))
 
-    for i, ticker in enumerate(tickers):
-        # Assume price_data and ma_data are obtained for the current ticker
-        data = DataManager(ticker, time_frame, interval)
-        price_data = data.get_price_data()  # Example function to get data
-        ma_data = data.get_moving_average(20)  # Example function to get data
+#     for i, ticker in enumerate(tickers):
+#         # Assume price_data and ma_data are obtained for the current ticker
+#         data = DataManager(ticker, time_frame, interval)
+#         price_data = data.get_price_data()  # Example function to get data
+#         ma_data = data.get_moving_average(20)  # Example function to get data
 
-        # Price and Moving Average
-        axs[i, 0].plot(price_data.index, price_data['Close'], label=f'{ticker} Price')
-        axs[i, 0].plot(ma_data.index, ma_data, label=f'{ticker} 20-day MA')
-        axs[i, 0].legend()
-        axs[i, 0].set_title(f'{ticker} Price and Moving Average')
+#         # Price and Moving Average
+#         axs[i, 0].plot(price_data.index, price_data['Close'], label=f'{ticker} Price')
+#         axs[i, 0].plot(ma_data.index, ma_data, label=f'{ticker} 20-day MA')
+#         axs[i, 0].legend()
+#         axs[i, 0].set_title(f'{ticker} Price and Moving Average')
 
-        # Additional Indicator (e.g., RSI)
-        rsi_data = data.get_RSI(14)  # Example function to get data
-        axs[i, 1].plot(rsi_data.index, rsi_data, label=f'{ticker} RSI')
-        axs[i, 1].legend()
-        axs[i, 1].set_title(f'{ticker} RSI')
+#         # Additional Indicator (e.g., RSI)
+#         rsi_data = data.get_RSI(14)  # Example function to get data
+#         axs[i, 1].plot(rsi_data.index, rsi_data, label=f'{ticker} RSI')
+#         axs[i, 1].legend()
+#         axs[i, 1].set_title(f'{ticker} RSI')
 
-    # Adjust spacing between subplots
-    plt.tight_layout()
+#     # Adjust spacing between subplots
+#     plt.tight_layout()
 
-    # Display the figure in Streamlit
-    st.pyplot(fig)
+#     # Display the figure in Streamlit
+#     st.pyplot(fig)
 
 
-'''
+# '''

@@ -2,7 +2,7 @@ from flask import Flask, redirect, url_for
 from flask_dance.contrib.google import make_google_blueprint, google
 import jwt
 app = Flask(__name__)
-app.secret_key = 'random_secret_key'
+# app.secret_key = ''
 blueprint = make_google_blueprint(client_id="293772337596-pb4g8lfra73eu2ila07j1gvsa469t06k.apps.googleusercontent.com", client_secret="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", redirect_to="https://https://2b96-49-43-25-67.ngrok-free.app/redirect_to_streamlit" )#"google_login")
 app.register_blueprint(blueprint, url_prefix="/login")
 

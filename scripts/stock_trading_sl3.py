@@ -7,7 +7,7 @@ import tensorboard as tb
 from tensorboard.backend.event_processing import event_accumulator
 
 # Function to load and plot data from a specified directory
-@st.cache
+# @st.cache
 def load_and_plot(directory):
     # Load data
     df_account_value = pd.read_csv(os.path.join(directory, 'df_account_value.csv'))

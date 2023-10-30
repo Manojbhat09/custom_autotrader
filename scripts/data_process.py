@@ -8,6 +8,8 @@ import pandas as pd
 from finrl.meta.data_processor import YahooFinance
 import yfinance as yf
 import math
+import pandas
+import logging
 
 MAX_TRANSACTIONS = 10
 
@@ -81,7 +83,8 @@ class seqTradeDataset(Dataset):
                  horizon=15, 
                  transform=None, 
                  ticker=None,
-                 max_transactions=5):
+                 max_transactions=5, 
+                 add_angles=True):
         self.data = data
         self.window_size = window_size
         self.horizon = horizon
@@ -89,15 +92,19 @@ class seqTradeDataset(Dataset):
         self.processor = YahooFinance()
         self.preprocessor = Solver()
         self.max_transactions = max_transactions
+        self.add_angles = add_angles
         MAX_TRANSACTIONS = self.max_transactions
         self.segment_scaler = Scaling1d(min_data=0, max_data=self.horizon, min_range=0, max_range=1)
+        if not hasattr(self, "input_scaler"):
+            self.input_scaler = MinMaxScaler
+
         if len(self.data) <=1:
             self.data = self.fetch_data()
 
         if len(self.data) < self.window_size + self.horizon:
             raise ValueError(f'Insufficient data: {len(self.data)} data points found, {self.window_size + self.horizon} required.')
         
-        assert isinstance(self.data, np.ndarray), f'Expected data of type numpy.ndarray, got {type(self.data)}'
+        assert isinstance(self.data, np.ndarray), f'Expected data of type np.ndarray, got {type(self.data)}'
 
         if np.isnan(self.data).any():
             raise ValueError('Data contains NaN values.')
@@ -124,6 +131,9 @@ class seqTradeDataset(Dataset):
         x = torch.tensor(self.data[idx:idx+self.window_size, :], dtype=torch.float32)  # Assuming 'Close' price is at index 3
         # Generate segments for the given index
         max_profit, segments = self.generate_segments(idx)
+        closing_prices =self.data[idx:idx+self.window_size, 3]
+        if self.add_angles:
+            heights, angles = self.generate_heights_angles(segments, closing_prices)  # Passing closing prices
 
         # Prepare the future price prediction target
         future_prices = self.data[idx+self.window_size:idx+self.window_size+self.horizon, 3]
@@ -138,26 +148,19 @@ class seqTradeDataset(Dataset):
         scaled_segments = self.segment_scaler.scale(segments)
         
         # Package segments, max profit, and price prediction target into a single tuple
-        y = (torch.tensor(scaled_segments, dtype=torch.float32), torch.tensor(max_profit, dtype=torch.float32), y_price_prediction)
+        if self.add_angles:
+             y = (torch.tensor(scaled_segments, dtype=torch.float32), 
+                torch.tensor(heights, dtype=torch.float32), 
+                torch.tensor(angles, dtype=torch.float32), 
+                torch.tensor(max_profit, dtype=torch.float32), 
+                y_price_prediction)
+        else:
+            y = (torch.tensor(scaled_segments, dtype=torch.float32), torch.tensor(max_profit, dtype=torch.float32), y_price_prediction)
         
         return x, y
     
-    # def __getitem__(self, idx):
-    #     x = self.data[idx:idx+self.window_size]
-    #     profit, y_segments = self.generate_segments(idx)
-    #     if self.transform:
-    #         x = self.transform(x)
-    #     return x, y_segments
-
-    # def generate_segments(self, idx):
-    #     series = self.data[idx:idx+self.window_size+self.horizon, 3]  # Considering 'Close' price for segments
-    #     profit, y_segments = self.generate_segments(idx)  # Use the generate_segments method here
-    #     if self.transform:
-    #         x = self.transform(x)
-    #     return x, profit, torch.tensor(y_segments, dtype=torch.float32) 
-    
     @classmethod
-    def fetch_data(self,downloader=None, 
+    def fetch_data(cls, downloader=None, 
                    ticker="AAPL", 
                    ticker_list=None, 
                    period='1mo', 
@@ -165,32 +168,48 @@ class seqTradeDataset(Dataset):
                    end_date=None, 
                    extract_details=False,
                    time_interval=None):
+        logger = logging.getLogger(__name__)
+        logger.debug("Fetching data with the following parameters:")
+        logger.debug(f"Downloader: {downloader}, Ticker: {ticker}, Ticker List: {ticker_list}, "
+                     f"Period: {period}, Start Date: {start_date}, End Date: {end_date}, "
+                     f"Extract Details: {extract_details}, Time Interval: {time_interval}")
+
         if downloader:
             processor = downloader()
         else:
             processor = YahooFinance()
+
         if ticker_list and type(ticker_list) == list:
             tickers = ticker_list
         else:
             ticker_list = [ticker]
+
         if period:
-            if len(ticker_list) ==1:
+            logger.debug(f"Fetching data for period: {period}")
+            if len(ticker_list) == 1:
                 data = yf.Ticker(ticker_list[0]).history(period, interval=time_interval if time_interval else '1d')
+                logger.debug(f"Data fetched for {ticker_list[0]} for period: {period}")
             else:
                 data = []
-                interval=time_interval if time_interval else '1d'
+                interval = time_interval if time_interval else '1d'
                 for ticker in ticker_list:
-                    data.append(yf.Ticker(ticker).history(period, interval=interval))
+                    data_piece = yf.Ticker(ticker).history(period, interval=interval)
+                    data.append(data_piece)
+                    logger.debug(f"Data fetched for {ticker} for period: {period}")
         else:
             if extract_details:
-                data=[]
-                if len(ticker_list)==1:
+                data = []
+                if len(ticker_list) == 1:
                     data = yf.Ticker(ticker_list[0])
                 else:
                     for ticker in ticker_list:
                         data.append(yf.Ticker(ticker))
+                logger.debug("Extracted details for the specified tickers.")
                 return data
+            logger.debug("Fetching data for custom date range.")
             data = processor.download_data(ticker_list, start_date, end_date, time_interval)
+
+        logger.debug("Data fetching completed.")
         return data
 
     def generate_segments(self, idx):
@@ -244,6 +263,31 @@ class seqTradeDataset(Dataset):
                 "transactions": transactions
             })
         return segments_data
+
+    @staticmethod
+    def generate_heights(segments, closing_prices):
+        heights = []
+        for seg in segments:
+            height = closing_prices[seg[1]] - closing_prices[seg[0]]
+            heights.append(height)
+        
+        return np.array(heights)
+    
+    @staticmethod
+    def generate_heights_angles(segments, closing_prices):
+
+        heights = []
+        for seg in segments:
+
+            height = closing_prices[ int(seg[1]) ] - closing_prices[ int(seg[0]) ]
+            heights.append(height)
+        
+        # Ensure no division by zero
+        index_differences = np.maximum(np.array([seg[1] - seg[0] for seg in segments]), 1)
+        price_differences = np.array([ closing_prices[ int(seg[1]) ] - closing_prices[ int(seg[0]) ] for seg in segments])
+        angles = np.arctan(price_differences / index_differences)
+        
+        return np.array(heights), angles
     
     # Feature Engineering
     @classmethod
@@ -255,7 +299,7 @@ class seqTradeDataset(Dataset):
 
     # Preprocessing
     @classmethod
-    def preprocess_data(self, data, drop_columns=False):
+    def preprocess_data_(self, data, drop_columns=False):
         data.dropna(inplace=True)
         data.interpolate(method='linear', axis=0, inplace=True, limit_direction='both')
         date=None
@@ -263,17 +307,63 @@ class seqTradeDataset(Dataset):
             date = data.index.values
             data = data.drop(columns=['date', 'begins_at', 'session', 'interpolated', 'symbol'], errors='ignore')
         scaler = MinMaxScaler()
+
         # scaler = MinMaxScaler(feature_range=(0, 1))
         scaled_data = scaler.fit_transform(data)
-        return scaled_data, scaler, date
+        self.input_scaler = scaler
+        return scaled_data, self.input_scaler, date
+    
+    def inverse_transform_predictions_(self, y_pred_scaled):
+        # Ensure the input_scaler has been fitted
+        if self.input_scaler.scale_ is None or self.input_scaler.min_ is None:
+            raise ValueError("The input_scaler has not been fitted yet.")
+        # Reverse the scaling of the predicted prices
+        y_pred = self.input_scaler.inverse_transform(y_pred_scaled)
+        return y_pred
+    
+    @classmethod
+    def preprocess_data(cls, data, drop_columns=False):
+        data.dropna(inplace=True)
+        data.interpolate(method='linear', axis=0, inplace=True, limit_direction='both')
+        date = None
+        if drop_columns:
+            date = data.index.values
+            data = data.drop(columns=['date', 'begins_at', 'session', 'interpolated', 'symbol'], errors='ignore')
+
+        cls.input_scaler_list = []  # Initialize an empty list to hold the scalers
+        # scaled_data = np.empty_like(data)  # Initialize an empty array to hold the scaled data
+        data = np.array(data)
+        for i in range(data.shape[1]):
+            scaler = MinMaxScaler()
+            scaled_column = scaler.fit_transform(data[..., i].reshape(-1, 1))
+            cls.input_scaler_list.append(scaler)  # Add the fitted scaler to the list
+            # scaled_data[..., i] = scaled_column.flatten()  # Add the scaled column to the scaled_data array
+
+        scaler = MinMaxScaler()
+
+        # scaler = MinMaxScaler(feature_range=(0, 1))
+        scaled_data = scaler.fit_transform(data)
+        cls.input_scaler = scaler
+        
+        return scaled_data, cls.input_scaler_list, date
+
+    def inverse_transform_predictions(self, y_pred_scaled, column_idx):
+        # Ensure the input_scaler_list has been initialized and the column_idx is valid
+        if not hasattr(self, 'input_scaler_list') or not 0 <= column_idx < len(self.input_scaler_list):
+            raise ValueError("Either the input_scaler_list has not been initialized or the column_idx is out of bounds.")
+        # Reverse the scaling of the predicted prices for the specified column
+        y_pred = self.input_scaler_list[column_idx].inverse_transform(y_pred_scaled.reshape(-1, 1))
+        return y_pred.flatten()
     
     @staticmethod
     def fetch_and_preprocess_data(ticker="AAPL", period='1mo', start_date=None, end_date=None, time_interval=None):
         data = seqTradeDataset.fetch_data(ticker=ticker, period=period, start_date=start_date, end_date=end_date, time_interval=time_interval)
+        if not len(data):
+            print(f"No data fetched for ticker: {ticker}")
+            return None
         data = seqTradeDataset.feature_engineering(data)
-        scaled_data, _ = seqTradeDataset.preprocess_data(data)
+        scaled_data, _, _ = seqTradeDataset.preprocess_data(data)
         return scaled_data
-
 
 class Solver:
     def gen_series(self, prices_lists, k):
@@ -372,6 +462,45 @@ def collate_fn(batch):
         torch.stack(padded_segments),
         torch.stack(prices),
         torch.stack(histories)
+    )
+
+def collate_fn_angled(batch):
+    data, segments, heights, angles, profits, prices = [], [], [], [], [], []
+    for item in batch:
+        data.append(item[0])
+        segments.append(item[1][0])
+        heights.append(item[1][1])
+        angles.append(item[1][2])
+        profits.append(item[1][3])
+        prices.append(item[1][4])
+
+    max_segments = MAX_TRANSACTIONS * 2  # Assuming each transaction consists of 2 segments
+    max_len = max(len(seg[0]) for seg in segments)
+
+    padded_segments, padded_heights, padded_angles = [], [], []
+
+    for seg, h, ang in zip(segments, heights, angles):
+        # Create new tensors of zeros with the desired dimensions
+        padded_seg = torch.zeros(max_segments, max_len, dtype=torch.float32)
+        padded_height = torch.zeros(max_segments, dtype=torch.float32)
+        padded_angle = torch.zeros(max_segments, dtype=torch.float32)
+        
+        # Copy the segments, heights, and angles data into the new tensors
+        seg_len = len(seg[0])
+        padded_seg[:seg.shape[0], :seg_len] = torch.tensor(seg, dtype=torch.float32)
+        padded_height[:len(h)] = torch.tensor(h, dtype=torch.float32)
+        padded_angle[:len(ang)] = torch.tensor(ang, dtype=torch.float32)
+
+        padded_segments.append(padded_seg)
+        padded_heights.append(padded_height)
+        padded_angles.append(padded_angle)
+
+    # Stack each list into a tensor
+    return (
+        torch.stack(data),
+        torch.stack(padded_segments), torch.stack(padded_heights), torch.stack(padded_angles),
+        torch.stack(profits),
+        torch.stack(prices)
     )
 
 if __name__ == "__main__":

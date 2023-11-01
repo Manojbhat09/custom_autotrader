@@ -6,7 +6,7 @@ However, if you're using multiple technical indicators (like Moving Averages, RS
 
 usage:
  python train_crypto.py --debug --train --expname height_angle_loss --model SegmentHeadingModel
-
+ python train_crypto.py --eval --debug --expname incr_hidden_bayesian --model SegmentBayesianHeadingModel --checkpoint_path run/experiment_20231030_095433/models/ETH-USD_checkpoint_experiment_20231030_095433.pth
 '''
 from scripts.loss_fn import LossFunctions
 from scripts.models import MultiHeadModel, make_model
@@ -41,15 +41,14 @@ import warnings
 warnings.filterwarnings("ignore") 
 
 # Define the root directory for this run
-# current_datetime = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 def generate_experiment_name():
     import datetime
     current_datetime = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     experiment_name = f'experiment_{current_datetime}'
     return experiment_name
+current_datetime = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 current_datetime = generate_experiment_name()
 run_dir = f'run/{current_datetime}'
-os.makedirs(run_dir, exist_ok=True)
 
 # Define sub-directories
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -62,22 +61,28 @@ TESTING_PLOT_FOLDER = os.path.join(PLOT_FOLDER, 'testing')
 RESULTS_FOLDER = os.path.join(run_dir, 'results')
 SCRIPTS_FOLDER = os.path.join(run_dir, 'results', 'scripts')
 
-# Create sub-directories
-os.makedirs(CHECKPOINT_FOLDER, exist_ok=True)
-os.makedirs(PLOT_FOLDER, exist_ok=True)
-os.makedirs(LOG_DIR, exist_ok=True)
-os.makedirs(TRAINING_PLOT_FOLDER, exist_ok=True)
-os.makedirs(TESTING_PLOT_FOLDER, exist_ok=True)
-os.makedirs(RESULTS_FOLDER, exist_ok=True)
-os.makedirs(SCRIPTS_FOLDER, exist_ok=True)
+def assign_variables(test):
+    global ROOT, CHECKPOINT_FOLDER, PLOT_FOLDER, LOG_DIR, TB_LOG_DIR, TRAINING_PLOT_FOLDER, TESTING_PLOT_FOLDER, RESULTS_FOLDER, SCRIPTS_FOLDER, current_datetime, run_dir
 
-# Copy scripts to SCRIPT_FOLDER
-script_name = os.path.basename(__file__)
-shutil.copy(script_name, f'{SCRIPTS_FOLDER}/{script_name}')
-current_dir = os.path.dirname(os.path.abspath(__file__))
-shutil.copy(os.path.join(current_dir, "scripts", "loss_fn.py"), os.path.join(SCRIPTS_FOLDER, "loss_fn.py"))
-shutil.copy(os.path.join(current_dir, "scripts", "models.py"), os.path.join(SCRIPTS_FOLDER, "models.py"))
-shutil.copy(os.path.join(current_dir, "scripts", "data_process.py"), os.path.join(SCRIPTS_FOLDER, "data_process.py"))
+    if not test:
+        # Create sub-directories
+        os.makedirs(run_dir, exist_ok=True)
+        os.makedirs(CHECKPOINT_FOLDER, exist_ok=True)
+        os.makedirs(PLOT_FOLDER, exist_ok=True)
+        os.makedirs(LOG_DIR, exist_ok=True)
+        os.makedirs(TRAINING_PLOT_FOLDER, exist_ok=True)
+        os.makedirs(TESTING_PLOT_FOLDER, exist_ok=True)
+        os.makedirs(RESULTS_FOLDER, exist_ok=True)
+        os.makedirs(SCRIPTS_FOLDER, exist_ok=True)
+
+def copy_files(SCRIPTS_FOLDER):
+    # Copy scripts to SCRIPT_FOLDER
+    script_name = os.path.basename(__file__)
+    shutil.copy(script_name, f'{SCRIPTS_FOLDER}/{script_name}')
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    shutil.copy(os.path.join(current_dir, "scripts", "loss_fn.py"), os.path.join(SCRIPTS_FOLDER, "loss_fn.py"))
+    shutil.copy(os.path.join(current_dir, "scripts", "models.py"), os.path.join(SCRIPTS_FOLDER, "models.py"))
+    shutil.copy(os.path.join(current_dir, "scripts", "data_process.py"), os.path.join(SCRIPTS_FOLDER, "data_process.py"))
 
 class TensorBoardLogger:
     def __init__(self, log_dir):
@@ -185,29 +190,43 @@ class Evaler:
         return out
     
 
-def test_model(model, dataloader, device):
-    model.eval()
-    all_predictions = []
-    all_targets = []
-    with torch.no_grad():
-        for batch_idx, data in enumerate(dataloader):
-            x_batch = data[0].to(device)
-            x_batch = x_batch.transpose(0, 1)  # batch size in the middle [60, 32, 9]
-            y_batch = [item.to(device) for item in data[1:]]
-            pred_segments, pred_profit, pred_prices = model(x_batch)
-            all_predictions.append(pred_prices.cpu().numpy())
-            all_targets.append(y_batch[4].cpu().numpy())
+    def test_model(self, model, dataloader, device):
+        model.eval()
+        all_predictions = []
+        all_targets = []
+        total_test_loss = 0
+        with torch.no_grad():
+            for batch_idx, data in enumerate(dataloader):
 
-    # Flatten the list of predictions and targets
-    all_predictions = np.concatenate(all_predictions, axis=0)
-    all_targets = np.concatenate(all_targets, axis=0)
+                x_batch = data[0].to(self.device)
+                x_batch = x_batch.transpose(0, 1)  # batch size in the middle [60, 32, 9]
+                y_batch = [item.to(self.device) for item in data[1:]]
 
-    # Calculate metrics
-    mae = mean_absolute_error(all_targets, all_predictions)
-    mse = mean_squared_error(all_targets, all_predictions)
-    rmse = np.sqrt(mse)
-    save_results(mae, mse, rmse, 'evaluation_results.txt')
-    return mae, mse, rmse
+                outputs = self.model(x_batch)
+                loss = self.criterion(*y_batch, *outputs)
+                total_test_loss += loss.item()
+
+                x_batch = x_batch.transpose(0, 1)
+                ex_inp, ex_tgt, ex_pred_mean, ex_pred_std = x_batch[-1][:, 3], y_batch[4][-1, :], outputs[3][0][-1, :], outputs[3][1][-1, :] # closing price selecting the last one
+                ex_inp, ex_tgt, ex_pred_mean, ex_pred_std = self.extract_numpy(ex_inp, ex_tgt, ex_pred_mean, ex_pred_std)
+                ex_pred_low = ex_pred_mean - ex_pred_std
+                ex_pred_high = ex_pred_mean + ex_pred_std
+                ex_inp, ex_tgt, ex_pred_low, ex_pred_high, ex_pred_mean = self.inverse_scale(ex_inp, ex_tgt, ex_pred_low, ex_pred_high, ex_pred_mean, column_idx=self.column_idx)
+                plot_tensorboard_bayes_test(ex_inp, ex_tgt, [ex_pred_low, ex_pred_high, ex_pred_mean], self.tb_logger, batch_idx)
+
+                all_predictions.append(ex_pred_mean)
+                all_targets.append(ex_tgt)
+
+            # Flatten the list of predictions and targets
+            all_predictions = np.concatenate(all_predictions, axis=0)
+            all_targets = np.concatenate(all_targets, axis=0)
+
+            # Calculate metrics
+            mae = mean_absolute_error(all_targets, all_predictions)
+            mse = mean_squared_error(all_targets, all_predictions)
+            rmse = np.sqrt(mse)
+            save_results(mae, mse, rmse, 'evaluation_results.txt')
+            return mae, mse, rmse
 
 def setup_logging(log_dir, log_level=logging.INFO):
     log_file_path = os.path.join(log_dir, 'run.log')
@@ -325,12 +344,23 @@ def plot_tensorboard_bayes(x_batch, y_prices, pred_prices, tb_logger, timestamp)
     tb_logger.log_plot('Validation/TimeSeriesWithPredictions', fig, timestamp)
     plt.close(fig)  # Close 
 
+def plot_tensorboard_bayes_test(x_batch, y_prices, pred_prices, tb_logger, timestamp):
+    fig = plot_time_series_with_predictions_bayes(x_batch, y_prices, pred_prices)
+    fig.savefig( os.path.join(TESTING_PLOT_FOLDER, f"pred_plot_{timestamp}.png") )
+    tb_logger.log_plot('Test/TimeSeriesWithPredictions', fig, timestamp)
+    plt.close(fig)  # Close 
+
 def main(args):
+    global PLOT_FOLDER, TESTING_PLOT_FOLDER, RESULTS_FOLDER
+   
     log_level = logging.DEBUG if args.debug else logging.INFO  # Assuming you have a debug flag
-    setup_logging(LOG_DIR)
-    added_experiment_name = args.expname+"_"+args.model
-    tb_log_dir= os.path.join(TB_LOG_DIR, current_datetime+"_"+added_experiment_name)
-    tb_logger = TensorBoardLogger(tb_log_dir)
+    assign_variables(args.eval)
+    
+    if not args.eval:
+        setup_logging(LOG_DIR)
+        added_experiment_name = args.expname+"_"+args.model
+        tb_log_dir= os.path.join(TB_LOG_DIR, current_datetime+"_"+added_experiment_name)
+        tb_logger = TensorBoardLogger(tb_log_dir)
 
     if 'head' in args.model.lower() or 'angle' in args.model.lower():
         args.add_angle = True
@@ -344,7 +374,8 @@ def main(args):
     # Fetch and preprocess data
     Ticker = "ETH-USD"
     horizon = 15
-    window_size = 128
+    window_size = 30
+    batch_size = 32
     processed_data = fetch_and_preprocess_data(ticker=Ticker, 
                                                    start_date = "2022-01-01", 
                                                    end_date = "2022-10-01",
@@ -356,9 +387,9 @@ def main(args):
                             window_size=window_size, 
                             horizon=horizon, 
                             add_angles=args.add_angle)
-    eth_dataloader = DataLoader(eth_dataset, batch_size=32, shuffle=True, collate_fn=collate)
-    eth_dataloader_val = DataLoader(eth_dataset, batch_size=32, shuffle=True, collate_fn=collate)
-    eth_dataloader_test = DataLoader(eth_dataset, batch_size=32, shuffle=False, collate_fn=collate)
+    eth_dataloader = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
+    eth_dataloader_val = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
+    eth_dataloader_test = DataLoader(eth_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate)
 
     # 9 is the features size
     # 20 segments 
@@ -367,18 +398,20 @@ def main(args):
 
     # Model setups
     model =  make_model(name=args.model, input_dim=9, hidden_dim=32, num_layers=2, num_segments=20, device=device) # increase hidden to 32 for bayes
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-    loss_fn = LossFunctions('geometric_bayesian', tb_logger=tb_logger, horizon=horizon)
-    criterion = loss_fn.get_loss_function()
 
     model.train()
     if args.train:
         logging.info("training the model")
+        copy_files(SCRIPTS_FOLDER)
+        
         train_losses = []
         test_losses = []
         num_epochs = 2000
         epoch_range = tqdm(range(num_epochs), desc="Training Progress", ncols=100, ascii=True)
         best_test_loss = float('inf')
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+        loss_fn = LossFunctions('geometric_bayesian', tb_logger=tb_logger, horizon=horizon)
+        criterion = loss_fn.get_loss_function()
         trainer = Trainer(model, eth_dataloader, optimizer, criterion, device, tb_logger)
         evaler = Evaler(model, eth_dataloader_val, criterion, device, tb_logger)
 
@@ -444,19 +477,42 @@ def main(args):
         plot_results(train_losses, test_losses)
 
         # Assuming val_dataloader is your dataloader for validation
-        mae, mse, rmse = test_model(model, eth_dataloader_val, device)
+        mae, mse, rmse = evaler.test_model(model, eth_dataloader_val, device)
         print("done")
 
     elif args.eval:
+        logging.info("Testing started")
+        experiment_location = os.path.join(os.path.dirname(args.checkpoint_path), "..")
+        TESTING_FOLDER = os.path.join(experiment_location, 'testing')
+        TESTING_PLOT_FOLDER = os.path.join(TESTING_FOLDER, "plots")
+        RESULTS_FOLDER = TESTING_FOLDER
+        os.makedirs(TESTING_FOLDER, exist_ok=True)
+        copy_files(TESTING_FOLDER)
+        tb_log_dir= os.path.join(experiment_location, "tb_logs")
+        log_folder_names = os.listdir(tb_log_dir)
+
+        tblog_experiment_folder = log_folder_names[0]
+        tb_dir = os.path.join(tb_log_dir, tblog_experiment_folder)
+        tb_logger = TensorBoardLogger(tb_dir)
+        loss_fn = LossFunctions('geometric_bayesian', tb_logger=tb_logger, horizon=horizon)
+        criterion = loss_fn.get_loss_function()
+        
+        # Ensure these directories exist
+        os.makedirs(PLOT_FOLDER, exist_ok=True)
+        os.makedirs(TESTING_PLOT_FOLDER, exist_ok=True)
+        os.makedirs(RESULTS_FOLDER, exist_ok=True)
+        
+        evaler = Evaler(model, eth_dataloader_val, criterion, device, tb_logger)
+
         # Load and evaluate the model
         try:
             model.load_state_dict(torch.load(args.checkpoint_path))
         except Exception as e:
             logging.exception("An error occurred while loading the model checkpoint.")
             logging.info("Moving on")
-
-        # Assuming val_dataloader is your dataloader for validation
-        mae, mse, rmse = test_model(model, eth_dataloader_test, device)
+        mae, mse, rmse = evaler.test_model(model, eth_dataloader_val, device)
+        print("done")
+        tb_logger.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train or evaluate a model")

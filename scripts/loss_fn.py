@@ -47,14 +47,17 @@ class GeometricConsistencyLoss(torch.nn.Module):
         sum_price_difference_predicted = price_difference_predicted.sum(dim=-1)
 
         # Compute Gaussian error between predicted max price and true max price
-        gaussian_error_1 = torch.exp(-((y_pred_max_price - y_true_max_price)**2) / (2 * self.sigma**2))
+        # gaussian_error_1 = torch.exp(-((y_pred_max_price - y_true_max_price)**2) / (2 * self.sigma**2))
         
-        # Compute Gaussian error between sum of all predicted segment price differences and true max price
-        gaussian_error_2 = torch.exp(-((sum_price_difference_predicted - y_true_max_price)**2) / (2 * self.sigma**2))
+        # # Compute Gaussian error between sum of all predicted segment price differences and true max price
+        # gaussian_error_2 = torch.exp(-((sum_price_difference_predicted - y_true_max_price)**2) / (2 * self.sigma**2))
         
-        # The geometric consistency loss is the absolute difference between gaussian_error_1 and gaussian_error_2
-        geometric_consistency_loss = torch.abs(gaussian_error_1 - gaussian_error_2).mean()
+        # # The geometric consistency loss is the absolute difference between gaussian_error_1 and gaussian_error_2
+        # geometric_consistency_loss = torch.abs(gaussian_error_1 - gaussian_error_2).mean()
 
+        error1 = nn.MSELoss()(y_pred_max_price, y_true_max_price)
+        error2 = nn.MSELoss()(sum_price_difference_predicted, y_true_max_price)
+        geometric_consistency_loss = torch.abs(error1 - error2).mean()
         return geometric_consistency_loss
 
 
@@ -71,7 +74,9 @@ class LossFunctions:
             'dtw_bipartite': self.custom_loss_dtw_bipartite, 
             'upd': self.custom_loss_upd,
             'geometric_consistency': self.custom_loss_geom_consistency, 
-            'geometric_bayesian': self.custom_loss_geom_bayesian
+            'geometric_bayesian': self.custom_loss_geom_bayesian, 
+            'geometric_bayesian_profit_penalty': self.custom_loss_geom_bayesian_profit, 
+            'geo_bayesian_profit_constrained': self.custom_loss_geom_bayesian_profit_constrained
         }
         self.tb_logger = tb_logger
         self.writer = tb_logger.writer
@@ -323,20 +328,98 @@ class LossFunctions:
         pred_angles = torch.arctan2(sin_angles, cos_angles)
         angle_loss = nn.MSELoss()(y_true_angles, pred_angles)
         segment_loss = self.bipartite_matching_loss(y_true_segments, y_pred_segments, dist_fn='cdist')
-        profit_loss = nn.MSELoss()(y_true_profit, y_pred_profit)
+        # profit_loss = nn.MSELoss()(y_true_profit, y_pred_profit)
         # price_loss = nn.MSELoss()(y_true_prices, y_pred_prices[1])
-        time_decay = torch.exp(-torch.arange(15).float() / sigma).cuda()  # Exponential decay
+
+        time_decay = torch.exp(-torch.arange(y_pred_prices[0].shape[-1]).float() / sigma).cuda()  # Exponential decay
         weighted_price_loss = (time_decay * nn.MSELoss(reduction='none')(y_pred_prices[0], y_true_prices).mean(dim=0)).sum()
 
         bayesian_price_loss = bayesian_loss_function(y_true_prices, y_pred_prices[0], y_pred_prices[1])
 
-        total_loss = (7/8)*(segment_loss + profit_loss + geom_loss + weighted_price_loss + angle_loss) + (1/8)*bayesian_price_loss
+        total_loss = (7/8)*(segment_loss + geom_loss + weighted_price_loss + angle_loss) + (1/8)*bayesian_price_loss
         self.losses = {'segment_loss': segment_loss, 
-                       'profit_loss': profit_loss, 
+                    #    'profit_loss': profit_loss, 
                        'price_loss': weighted_price_loss,
                        'bayesian_price_loss': bayesian_price_loss,
                        'angle_loss': angle_loss, 
                        'geom_loss': geom_loss, 
+                       'total_loss': total_loss}
+        return total_loss
+    
+    def custom_loss_geom_bayesian_profit(self,  y_true_segments, y_true_heights, y_true_angles, y_true_profit, y_true_prices, 
+                                         y_pred_segments, y_pred_angles,  y_pred_profit,  y_pred_prices,  sigma=1.0):
+        geom_loss = self.geom_lossfn(y_true_profit, y_pred_profit, y_pred_angles, y_pred_segments)
+        sin_angles, cos_angles = y_pred_angles[..., 0], y_pred_angles[..., 1]
+        # pred_tan_angles = sin_angles/(cos_angles + 1e-08)
+        pred_angles = torch.arctan2(sin_angles, cos_angles)
+        angle_loss = nn.MSELoss()(y_true_angles, pred_angles)
+        segment_loss = self.bipartite_matching_loss(y_true_segments, y_pred_segments, dist_fn='cdist')
+        # profit_loss = nn.MSELoss()(y_true_profit, y_pred_profit)
+        # price_loss = nn.MSELoss()(y_true_prices, y_pred_prices[1])
+
+        time_decay = torch.exp(-torch.arange(y_pred_prices[0].shape[-1]).float() / sigma).cuda()  # Exponential decay
+        weighted_price_loss = (time_decay * nn.MSELoss(reduction='none')(y_pred_prices[0], y_true_prices).mean(dim=0)).sum()
+
+        bayesian_price_loss = bayesian_loss_function(y_true_prices, y_pred_prices[0], y_pred_prices[1])
+
+        penalty_strength = 10.0  # or some other value\
+        negative_profit_penalty = penalty_strength * (F.relu(-y_pred_profit)**2).mean()
+        profit_loss = nn.MSELoss()(y_true_profit, y_pred_profit)
+
+        total_loss = (7/8)*(segment_loss + geom_loss + weighted_price_loss + angle_loss + negative_profit_penalty + profit_loss) + (1/8)*bayesian_price_loss
+        self.losses = {'segment_loss': segment_loss, 
+                       'profit_loss':profit_loss, 
+                       'negative_profit_penalty': negative_profit_penalty, 
+                       'price_loss': weighted_price_loss,
+                       'bayesian_price_loss': bayesian_price_loss,
+                       'angle_loss': angle_loss, 
+                       'geom_loss': geom_loss, 
+                       'total_loss': total_loss}
+        return total_loss
+
+    def custom_loss_geom_bayesian_profit_constrained(self,  y_true_segments, y_true_heights, y_true_angles, y_true_profit, y_true_prices, 
+                                         y_pred_segments, y_pred_angles,  y_pred_profit,  y_pred_prices,  sigma=1.0):
+        geom_loss = self.geom_lossfn(y_true_profit, y_pred_profit, y_pred_angles, y_pred_segments)
+        sin_angles, cos_angles = y_pred_angles[..., 0], y_pred_angles[..., 1]
+        # pred_tan_angles = sin_angles/(cos_angles + 1e-08)
+        pred_angles = torch.arctan2(sin_angles, cos_angles)
+        angle_loss = nn.MSELoss()(y_true_angles, pred_angles)
+        segment_loss = self.bipartite_matching_loss(y_true_segments, y_pred_segments, dist_fn='cdist')
+        # profit_loss = nn.MSELoss()(y_true_profit, y_pred_profit)
+        # price_loss = nn.MSELoss()(y_true_prices, y_pred_prices[1])
+
+        time_decay = 10*torch.exp(-torch.arange(y_pred_prices[0].shape[-1]).float() / sigma).cuda()  # Exponential decay
+        weighted_price_loss = (time_decay * nn.MSELoss(reduction='none')(y_pred_prices[0], y_true_prices).mean(dim=0)).sum()
+
+        bayesian_price_loss = bayesian_loss_function(y_true_prices, y_pred_prices[0], y_pred_prices[1])
+
+        penalty_strength = 10.0  # or some other value\
+        negative_profit_penalty = penalty_strength * (F.relu(-y_pred_profit)**2).mean()
+        profit_loss = nn.MSELoss()(y_true_profit, y_pred_profit)
+
+        # Unprofitable Decision Penalty
+        buy_values = y_pred_segments[..., 0]  # Shape: (batch_size, num_segments)
+        sell_values = y_pred_segments[..., 1]  # Shape: (batch_size, num_segments)
+        true_buy_values =y_true_segments[..., 0]
+
+        # Calculating unprofitable_loss and total_buy_cost
+        unprofitable_loss = torch.sum((buy_values - sell_values).clamp(min=0), dim=1).mean()  # Shape: (batch_size,)
+        # total_buy_cost = torch.sum(buy_values, dim=1) 
+        # true_buy_cost = torch.sum(true_buy_values, dim=1)
+        buy_loss = torch.abs(buy_values-true_buy_values).sum()
+
+        udp = unprofitable_loss + buy_loss
+
+        total_loss = (7/8)*(segment_loss + geom_loss + weighted_price_loss + angle_loss + negative_profit_penalty + profit_loss + udp) + (1/8)*bayesian_price_loss
+        self.losses = {'segment_loss': segment_loss, 
+                       'profit_loss':profit_loss, 
+                       'negative_profit_penalty': negative_profit_penalty, 
+                       'price_loss': weighted_price_loss,
+                       'bayesian_price_loss': bayesian_price_loss,
+                       'angle_loss': angle_loss, 
+                       'geom_loss': geom_loss, 
+                       'unprofitable_loss': unprofitable_loss, 
+                       'buy_loss': buy_loss,
                        'total_loss': total_loss}
         return total_loss
 
@@ -378,6 +461,12 @@ final_cost_matrix = cost_matrix + alpha * slope_cost_matrix  # alpha is a weight
 
 segment_importance = # obtain the importance of each segment
 weighted_cost_matrix = cost_matrix * segment_importance.unsqueeze(0)
+
+
+
+if scaler:
+            input_min, input_max = torch.tensor(scaler.data_min_).cuda(), torch.tensor(scaler.data_max_).cuda()
+            y_pred_profit = (y_pred_profit - y_pred_profit.min())/(y_pred_profit.min() - y_pred_profit.max())*(input_min - input_max) + input_min
 
 '''
 

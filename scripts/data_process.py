@@ -10,6 +10,8 @@ import yfinance as yf
 import math
 import pandas
 import logging
+import joblib
+import os
 
 MAX_TRANSACTIONS = 10
 
@@ -84,7 +86,7 @@ class seqTradeDataset(Dataset):
                  transform=None, 
                  ticker=None,
                  max_transactions=5, 
-                 add_angles=True):
+                 add_angles=True, just_init=False):
         self.data = data
         self.window_size = window_size
         self.horizon = horizon
@@ -95,8 +97,10 @@ class seqTradeDataset(Dataset):
         self.add_angles = add_angles
         MAX_TRANSACTIONS = self.max_transactions
         self.segment_scaler = Scaling1d(min_data=0, max_data=self.horizon, min_range=0, max_range=1)
+        if just_init:
+            return
         if not hasattr(self, "input_scaler"):
-            self.input_scaler = MinMaxScaler
+            self.input_scaler = MinMaxScaler()
 
         if len(self.data) <=1:
             self.data = self.fetch_data()
@@ -183,7 +187,7 @@ class seqTradeDataset(Dataset):
             tickers = ticker_list
         else:
             ticker_list = [ticker]
-
+        import pdb; pdb.set_trace()
         if period:
             logger.debug(f"Fetching data for period: {period}")
             if len(ticker_list) == 1:
@@ -216,7 +220,7 @@ class seqTradeDataset(Dataset):
         assert isinstance(idx, int) and idx >= 0, f'Expected idx to be a non-negative integer, got {idx}'
         assert idx + self.window_size + self.horizon <= len(self.data), f'Index {idx} out of bounds!'
         
-        series = self.data[idx+self.window_size:idx+self.window_size+self.horizon, 3]  # Considering 'Close' price for segments
+        series = self.data[idx+self.window_size:idx+self.window_size+self.horizon, 3]  # TODO Considering 'Close' price for segments
         
         if series.size == 0 or self.max_transactions == 0:
             return 0, []
@@ -322,7 +326,7 @@ class seqTradeDataset(Dataset):
         return y_pred
     
     @classmethod
-    def preprocess_data(cls, data, drop_columns=False):
+    def preprocess_data(cls, data, drop_columns=False, run_dir=None, load_scaler=''):
         data.dropna(inplace=True)
         data.interpolate(method='linear', axis=0, inplace=True, limit_direction='both')
         date = None
@@ -330,6 +334,20 @@ class seqTradeDataset(Dataset):
             date = data.index.values
             data = data.drop(columns=['date', 'begins_at', 'session', 'interpolated', 'symbol'], errors='ignore')
 
+        if load_scaler:
+            input_scaler_list = joblib.load(os.path.join(load_scaler, 'input_scaler_list.pkl'))
+            input_scaler = joblib.load(os.path.join(load_scaler, 'input_scaler.pkl'))
+            
+            cls.input_scaler_list = input_scaler_list
+            cls.input_scaler = input_scaler
+            data = np.array(data)
+            # for i in range(data.shape[1]):
+            #     scaled_column = cls.input_scaler_list[i].transform(data[..., i].reshape(-1, 1))
+            #     cls.input_scaler_list.append(scaler)  # Add the fitted sc
+
+            scaled_data = cls.input_scaler.transform(data)
+            return scaled_data, cls.input_scaler_list, date 
+              
         cls.input_scaler_list = []  # Initialize an empty list to hold the scalers
         # scaled_data = np.empty_like(data)  # Initialize an empty array to hold the scaled data
         data = np.array(data)
@@ -340,29 +358,38 @@ class seqTradeDataset(Dataset):
             # scaled_data[..., i] = scaled_column.flatten()  # Add the scaled column to the scaled_data array
 
         scaler = MinMaxScaler()
-
         # scaler = MinMaxScaler(feature_range=(0, 1))
         scaled_data = scaler.fit_transform(data)
         cls.input_scaler = scaler
-        
+
+        # Save the scalers to a file
+        if run_dir:
+            joblib.dump(cls.input_scaler_list, os.path.join(run_dir, 'input_scaler_list.pkl'))
+            joblib.dump(cls.input_scaler, os.path.join(run_dir, 'input_scaler.pkl'))
+
         return scaled_data, cls.input_scaler_list, date
 
-    def inverse_transform_predictions(self, y_pred_scaled, column_idx):
+    def inverse_transform_predictions(self, y_pred_scaled, column_idx, scaler_list=None):
         # Ensure the input_scaler_list has been initialized and the column_idx is valid
         if not hasattr(self, 'input_scaler_list') or not 0 <= column_idx < len(self.input_scaler_list):
             raise ValueError("Either the input_scaler_list has not been initialized or the column_idx is out of bounds.")
         # Reverse the scaling of the predicted prices for the specified column
+        if scaler_list:
+            return scaler_list[column_idx].inverse_transform(y_pred_scaled.reshape(-1, 1))
         y_pred = self.input_scaler_list[column_idx].inverse_transform(y_pred_scaled.reshape(-1, 1))
         return y_pred.flatten()
     
     @staticmethod
-    def fetch_and_preprocess_data(ticker="AAPL", period='1mo', start_date=None, end_date=None, time_interval=None):
+    def fetch_and_preprocess_data(ticker="AAPL", period='1mo', start_date=None, end_date=None, time_interval=None, run_dir=None):
         data = seqTradeDataset.fetch_data(ticker=ticker, period=period, start_date=start_date, end_date=end_date, time_interval=time_interval)
+
         if not len(data):
             print(f"No data fetched for ticker: {ticker}")
             return None
+        # save the data 
+        joblib.dump(run_dir, 'dataset.pkl')
         data = seqTradeDataset.feature_engineering(data)
-        scaled_data, _, _ = seqTradeDataset.preprocess_data(data)
+        scaled_data, _, _ = seqTradeDataset.preprocess_data(data, run_dir=run_dir)
         return scaled_data
 
 class Solver:

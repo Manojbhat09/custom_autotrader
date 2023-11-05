@@ -99,6 +99,7 @@ class SegmentBayesianModel(nn.Module):
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
         
+
     def forward(self, x):
         h0 = torch.zeros(self.num_layers, x.size(1), self.hidden_dim).to(x.device)
         c0 = torch.zeros(self.num_layers, x.size(1), self.hidden_dim).to(x.device)

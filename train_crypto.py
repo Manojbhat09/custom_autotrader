@@ -7,7 +7,8 @@ However, if you're using multiple technical indicators (like Moving Averages, RS
 usage:
  python train_crypto.py --debug --train --expname height_angle_loss --model SegmentHeadingModel
  python train_crypto.py --eval --debug --expname incr_hidden_bayesian --model SegmentBayesianHeadingModel --checkpoint_path run/experiment_20231030_095433/models/ETH-USD_checkpoint_experiment_20231030_095433.pth
-'''
+ python train_crypto.py --debug --train --expname="bayes_head_15m_60_15_64_geom_mse_profit_penalty_loss" --model SegmentBayesianHeadingModel
+ '''
 from scripts.loss_fn import LossFunctions
 from scripts.models import MultiHeadModel, make_model
 from tqdm import tqdm
@@ -132,10 +133,9 @@ class Trainer:
             # Forward pass
             self.optimizer.zero_grad()
             outputs = self.model(x_batch)
-            # self.postprocess(outputs)
 
             # Compute the loss
-            loss = self.criterion(*y_batch, *outputs)
+            loss = self.criterion(*y_batch, *outputs, epoch=epoch)
             loss.backward()
             self.optimizer.step()
             total_train_loss += loss.item()
@@ -168,7 +168,7 @@ class Evaler:
             y_batch = [item.to(self.device) for item in data[1:]]
 
             outputs = self.model(x_batch)
-            loss = self.criterion(*y_batch, *outputs)
+            loss = self.criterion(*y_batch, *outputs, epoch=batch_idx)
             total_test_loss += loss.item()
 
             x_batch = x_batch.transpose(0, 1)
@@ -203,7 +203,7 @@ class Evaler:
                 y_batch = [item.to(self.device) for item in data[1:]]
 
                 outputs = self.model(x_batch)
-                loss = self.criterion(*y_batch, *outputs)
+                loss = self.criterion(*y_batch, *outputs, epoch=batch_idx)
                 total_test_loss += loss.item()
 
                 x_batch = x_batch.transpose(0, 1)
@@ -228,7 +228,7 @@ class Evaler:
             save_results(mae, mse, rmse, 'evaluation_results.txt')
             return mae, mse, rmse
 
-def setup_logging(log_dir, log_level=logging.INFO):
+def setup_logging(log_dir, log_level=logging.DEBUG):
     log_file_path = os.path.join(log_dir, 'run.log')
     logger = logging.getLogger('')
     logger.setLevel(log_level)
@@ -284,9 +284,11 @@ def fetch_and_preprocess_data(ticker="ETH-USD", start_date="2022-01-01", end_dat
     # Fetching the data
     processed_data = seqTradeDataset.fetch_and_preprocess_data(
         ticker=ticker, 
+        period=period, 
         start_date=start_date, 
         end_date=end_date, 
-        time_interval=time_interval)
+        time_interval=time_interval, 
+        run_dir=run_dir)
     if not len(processed_data):
         logging.error(f"No data fetched for ticker: {ticker}")
         return None, None
@@ -372,16 +374,23 @@ def main(args):
 
     # Assuming df is your dataframe with the features
     # Fetch and preprocess data
-    Ticker = "ETH-USD"
+    Ticker = "BTC-USD"
     horizon = 15
-    window_size = 30
+    window_size = 60
     batch_size = 32
+    start_date = "2022-01-01" # ignored
+    end_date = "2022-10-01" # ignored
+    time_interval = "15m"
+    period = "1mo"  
+    num_segments = 20
+    hidden_dim = 64
+    num_layers = 5
+    input_dims = 18
     processed_data = fetch_and_preprocess_data(ticker=Ticker, 
-                                                   start_date = "2022-01-01", 
-                                                   end_date = "2022-10-01",
-                                                   time_interval = "15m", 
-                                                   period = "1y")
-    
+                                                   start_date = start_date, 
+                                                   end_date = end_date, 
+                                                   time_interval = time_interval, 
+                                                   period = period)
     # Creating the Dataset and DataLoader
     eth_dataset = seqTradeDataset(processed_data, 
                             window_size=window_size, 
@@ -397,7 +406,7 @@ def main(args):
     checkpoint_path = os.path.join(CHECKPOINT_FOLDER,  f'{Ticker}_checkpoint_{current_datetime}.pth')
 
     # Model setups
-    model =  make_model(name=args.model, input_dim=9, hidden_dim=32, num_layers=2, num_segments=20, device=device) # increase hidden to 32 for bayes
+    model =  make_model(name=args.model, input_dim=input_dims, hidden_dim=hidden_dim, num_layers=num_layers, num_segments=num_segments, future_timestamps=horizon, device=device) # increase hidden to 32 for bayes
 
     model.train()
     if args.train:
@@ -410,7 +419,7 @@ def main(args):
         epoch_range = tqdm(range(num_epochs), desc="Training Progress", ncols=100, ascii=True)
         best_test_loss = float('inf')
         optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-        loss_fn = LossFunctions('geometric_bayesian', tb_logger=tb_logger, horizon=horizon)
+        loss_fn = LossFunctions('geometric_bayesian_weighted', tb_logger=tb_logger, horizon=horizon)
         criterion = loss_fn.get_loss_function()
         trainer = Trainer(model, eth_dataloader, optimizer, criterion, device, tb_logger)
         evaler = Evaler(model, eth_dataloader_val, criterion, device, tb_logger)
@@ -502,11 +511,10 @@ def main(args):
         os.makedirs(TESTING_PLOT_FOLDER, exist_ok=True)
         os.makedirs(RESULTS_FOLDER, exist_ok=True)
         
-        evaler = Evaler(model, eth_dataloader_val, criterion, device, tb_logger)
-
         # Load and evaluate the model
         try:
             model.load_state_dict(torch.load(args.checkpoint_path))
+            evaler = Evaler(model, eth_dataloader_val, criterion, device, tb_logger)
         except Exception as e:
             logging.exception("An error occurred while loading the model checkpoint.")
             logging.info("Moving on")

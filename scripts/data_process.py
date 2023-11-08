@@ -13,6 +13,14 @@ import logging
 import joblib
 import os
 
+import torch.nn as nn
+
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+import pywt
+import numpy as np
+
 MAX_TRANSACTIONS = 10
 
 class Scaling1d:
@@ -77,7 +85,46 @@ class Scaling1d:
     def get_scaling_params(self):
         return self.min_data, self.max_data, self.min_range, self.max_range
 
+class InputPreprocessor(nn.Module):
 
+    def __init__(self):
+        super().__init__()
+        
+        self.pca = PCA(n_components=5) 
+        self.scaler = StandardScaler()
+        
+    def forward(self, x):
+        x = np.array(x)
+        # FFT for frequency components
+        fft_features = np.fft.rfft(x[:, [0,4]]) 
+        fft_features = fft_features.real
+        
+        # Wavelet encoding
+        coeffs = pywt.wavedec(x[:, 3], 'db1', level=2)
+        wavelet_features = []
+        for coeff in coeffs:
+            wavelet_features.append(coeff) 
+        
+        # Differential encoding
+        diffs = np.diff(x[:,3])
+        
+        # PCA dimensionality reduction
+        x_scaled = self.scaler.fit_transform(x)
+        pca_features = self.pca.fit_transform(x_scaled)
+        
+        # Concat all features
+        wavelet_array = np.concatenate(wavelet_features, axis=0) 
+        max_shape = x.shape[0]
+
+        fft_features = np.pad(fft_features, [(0, max_shape - fft_features.shape[0]), (0,0)])
+        # wavelet_array = np.pad(wavelet_array, [(0, max_shape - wavelet_array.shape[0])])  
+        wavelet_array = wavelet_array[:max_shape]
+        diffs = np.pad(diffs, [(0, max_shape - diffs.shape[0])])
+        pca_features = np.pad(pca_features, [(0, max_shape - pca_features.shape[0]), (0,0)])
+
+        features = np.concatenate([fft_features, wavelet_array[:, None], diffs[:, None], pca_features], axis=-1)
+        # total_features = np.concatenate([x, features], axis=-1)
+        return features
 
 class seqTradeDataset(Dataset):
     def __init__(self, data, 
@@ -382,13 +429,23 @@ class seqTradeDataset(Dataset):
     @staticmethod
     def fetch_and_preprocess_data(ticker="AAPL", period='1mo', start_date=None, end_date=None, time_interval=None, run_dir=None):
         data = seqTradeDataset.fetch_data(ticker=ticker, period=period, start_date=start_date, end_date=end_date, time_interval=time_interval)
-
+        # data = data.drop(['Dividends', "Stock Splits"], axis=1) # dropping mostly empty columns
+        # import pdb; pdb.set_trace()
         if not len(data):
             print(f"No data fetched for ticker: {ticker}")
             return None
         # save the data 
-        joblib.dump(run_dir, 'dataset.pkl')
-        data = seqTradeDataset.feature_engineering(data)
+        joblib.dump(data, os.path.join(run_dir, 'raw_data.pkl')) 
+        
+        # Input preprocessing
+        input_processor = InputPreprocessor()
+        processed_features = input_processor(data)
+        
+        data_features = seqTradeDataset.feature_engineering(data)
+
+        # join 
+        total_features = np.concatenate([np.array(data_features), processed_features], axis=-1)
+        data = pandas.DataFrame(data=total_features, index=data.index)
         scaled_data, _, _ = seqTradeDataset.preprocess_data(data, run_dir=run_dir)
         return scaled_data
 

@@ -2,15 +2,22 @@ from robinhood_manager import RobinhoodManager
 import matplotlib.pyplot as plt
 import streamlit as st
 st.set_page_config(page_title="Login", layout='wide')
-from data_manager import DataManager
+from data_manager import DataManager, ModelInference
 from auth_manager import AuthManager, verify_token
 import plotly.subplots as sp
 import plotly.graph_objects as go
 import numpy as np
 import random
 import time
+import sys
+sys.path.append("..")
+from scripts.models import make_model
+import torch
+torch.manual_seed(42)  # Replace 42 with your desired seed value
+if torch.cuda.is_available():  # If you're using a GPU
+    torch.cuda.manual_seed_all(42)
 
-
+USE_ML = True
 auth = AuthManager()
 tickers = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'FB', 'TSLA', 'NFLX', 'SPY', 'BA']  # Your list of tickers
 time_frame = st.sidebar.selectbox("Select Time Frame", ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'])
@@ -23,6 +30,27 @@ bollinger_bands_selected = st.sidebar.checkbox('Bollinger Bands')  # Added as an
 fibonacci_retracements_selected = st.sidebar.checkbox('Fibonacci Retracements')  # Added as an example
 ichimoku_cloud_selected = st.sidebar.checkbox('Ichimoku Cloud')  # Added as an example
 robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MENkeys796@09')
+
+config = {
+    'scrollZoom': True, 
+    'displayModeBar': True, 
+    'toImageButtonOptions': {
+            'format': 'svg', # one of png, svg, jpeg, webp
+            'filename': 'custom_image',
+            'height': 500,
+            'width': 700,
+            'scale': 1 # Multiply title/legend/axis/canvas sizes by this factor
+            }, 
+    'modeBarButtonsToAdd': ['drawline',
+            'drawopenpath',
+            'drawclosedpath',
+            'drawcircle',
+            'drawrect',
+            'eraseshape'
+            ]
+    }
+
+cache = PredictionCache()
 
 def get_robinhood_ticker_lists():
 
@@ -75,10 +103,25 @@ def display_main_plotting_page():
         robinhood_manager = st.session_state['robinhood_manager']
         unique_symbols = robinhood_manager.get_all_unique_symbols()
         ticker_lists = get_robinhood_ticker_lists() # overriding
+        ticker_lists.update({"none" : []})
         # Create a dropdown menu with the unique symbols
+    
+    # adding crypto list 
+    ticker_lists.update({"Crypto" : ['BTC', "ETH", "SOL"]})
 
     selected_list = st.sidebar.selectbox("Select Ticker List", list(ticker_lists.keys()))
     tickers = ticker_lists[selected_list]
+
+    # hardcoding the string for yfinance dataset 
+    
+    crypto_ticker = [ticker_name for ticker_name in ticker_lists.keys() if 'Crypto' in ticker_name]
+    if len(crypto_ticker):
+        for crypto_list_name in crypto_ticker:
+            for idx, ticker in enumerate(ticker_lists[crypto_list_name]):
+                if 'BTC' in ticker:
+                    ticker_lists[crypto_list_name][idx] = 'BTC-USD'
+                if 'ETH' in ticker:
+                    ticker_lists[crypto_list_name][idx] = 'ETH-USD'
 
      # Pagination logic
     num_plots_perpage = 4
@@ -99,27 +142,58 @@ def display_main_plotting_page():
     )
 
     for i, ticker in enumerate(tickers[start_idx:end_idx]):
-        data = DataManager(ticker, time_frame, interval)
-        price_data = data.get_price_data()
+        data_manager = DataManager(ticker, time_frame, interval)
+        price_data = data_manager.get_price_data()
         row_idx = i + 1  # Adjusting for 1-based index
 
         # Price and Moving Average
-        data.plot_price_ma(ticker, price_data, fig, row_idx)
+        data_manager.plot_price_ma(ticker, price_data, fig, row_idx)
 
+        button_key = f'Predict Future Prices_{ticker}_{i}'  # Create a unique key for each button
+        if st.button('Predict Future Prices', key=button_key):
+            zoom_range = st.session_state.get('zoom_range', (len(price_data) - 100, len(price_data)))  # Default to last 100 data points
+            # The code above for running inference and plotting predicted prices
+            # Instantiate ModelInference
+            model_inference = ModelInference(model_name='SegmentBayesianHeadingModel', checkpoint_path='/home/mbhat/tradebot/custom_autotrader/run/experiment_20231103_162231/models/BTC-USD_checkpoint_experiment_20231103_162231.pth')
+            
+            update_predictions(price_data=price_data, window_size=60, model_inference=model_inference, cache=cache)
+            cached_price_data = cache.cached_price_data()[-60:]  # Assuming prediction for last 60 data points
+            cached_segment_data = cache.cached_segment_data()
+            # Run inference
+            # if not model_inference.check_model_compatability(ticker, time_frame, interval):
+            #     skip with error logs and print out compatiablity criteria
+            
+            update_predictions(price_data=price_data, window_size=60, model_inference=model_inference, cache=cache)
+            # outputs, start_idx = model_inference.run_inference_bayesian_heading(price_data, ticker)
+            # # Get predicted prices
+            # y_pred_segments, y_pred_angles, y_pred_profit, y_pred_prices_mean, y_pred_prices_low, y_pred_prices_high = outputs
+
+            # Plot and display predicted prices
+            fig = data_manager.plot_predicted_prices(*cached_price_data(), fig, row_idx, start_idx)
+            fig = data_manager.plot_predicted_segments(*cached_segment_data(), fig, row_idx, start_idx, zoom_range)
+        
+            # Setting the x-axis range for zoom and space for horizon predictions
+            xaxis_range = [zoom_range[0], zoom_range[1] + 15]  # Assuming horizon predictions for next 15 data points
+            fig.update_xaxes(range=xaxis_range, row=row_idx, col=2)
+
+            f'''
+            Max Profit predicted: {y_pred_profit[0]}
+            '''
+        
         # Additional Indicators
         if rsi_selected: # additional_indicator
-            data.plot_rsi(ticker, fig, row_idx)
+            data_manager.plot_rsi(ticker, fig, row_idx)
         if macd_selected:
-            data.plot_macd(ticker, fig, row_idx)
+            data_manager.plot_macd(ticker, fig, row_idx)
         if bollinger_bands_selected:
-            data.plot_bollinger_bands(ticker, price_data, fig, row_idx)
+            data_manager.plot_bollinger_bands(ticker, price_data, fig, row_idx)
         if fibonacci_retracements_selected:
-            data.plot_fibonacci_retracements(ticker, price_data, fig, row_idx)
+            data_manager.plot_fibonacci_retracements(ticker, price_data, fig, row_idx)
         if ichimoku_cloud_selected:
-            data.plot_ichimoku_cloud(ticker, price_data, fig, row_idx)
+            data_manager.plot_ichimoku_cloud(ticker, price_data, fig, row_idx)
 
     fig.update_layout(
-        height=300*num_plots_perpage,  # Adjust height to accommodate the number of tickers
+        height=400*num_plots_perpage,  # Adjust height to accommodate the number of tickers
         title_text="Multi-Ticker Analysis",
         #showlegend=True
     )

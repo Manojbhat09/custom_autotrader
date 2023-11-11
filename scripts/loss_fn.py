@@ -8,6 +8,8 @@ from scipy.spatial.distance import euclidean
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal
+from torch.distributions.relaxed_categorical import ExpRelaxedCategorical
+import logging
 '''
 
 In this function:
@@ -60,6 +62,247 @@ class GeometricConsistencyLoss(torch.nn.Module):
         geometric_consistency_loss = torch.abs(error1 - error2).mean()
         return geometric_consistency_loss
 
+class LossWithExponentialPreference:
+
+    def __init__(self, alpha=0.8):
+        self.alpha = alpha
+
+    def __call__(self, l1, l2, l3, l4, l5):
+        
+        w1 = 1.0
+        w2 = self.alpha
+        w3 = self.alpha**2 
+        w4 = self.alpha**3
+        w5 = self.alpha**4
+
+        weighted_loss = w1*l1 + w2*l2 + w3*l3 + w4*l4 + w5*l5  
+        weighted_loss = weighted_loss / (w1 + w2 + w3 + w4 + w5)
+
+        # print(f"Losses - Price: {l1:.4f}, Geo: {l2:.4f}, Segment: {l3:.4f}, Angle: {l4:.4f}, Bayesian: {l5:.4f}")
+        
+        return weighted_loss
+    
+class ReshapeSampler(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, probs, expected_shape):
+        
+        flat_probs = probs.reshape(probs.shape[0] * probs.shape[1], probs.shape[2])  
+        
+        samples = torch.multinomial(flat_probs, num_samples=1)
+
+        samples = samples.reshape(expected_shape)
+        
+        ctx.save_for_backward(probs, samples)
+
+        return samples
+
+    @staticmethod
+    def backward(ctx, grad_samples):
+        
+        # Inside ReshapeSampler.backward
+
+        probs, samples = ctx.saved_tensors
+
+        batch_size, num_segments = samples.shape
+        device = probs.device
+
+        # Initialize gradient
+        grad_probs = torch.zeros_like(probs)
+
+        # Get probability of sampled indices
+        sample_probs = probs.reshape(-1).index_select(0, samples.view(-1)) 
+
+        # Assign gradient based on sample probability
+        grad_probs.reshape(-1).index_add_(0, samples.view(-1), 
+                                            sample_probs.new_ones(batch_size * num_segments)) 
+
+        # Average across batch
+        grad_probs = grad_probs / batch_size  
+        grad_probs = grad_samples + grad_probs
+        return grad_probs, None
+    
+class OptimalTransportLoss:
+
+    def __init__(self, epsilon=0.1):
+        self.epsilon = epsilon
+
+    def __call__(self, pred_segments, target_segments):
+        
+        # Cost matrix
+        cost_matrix = torch.cdist(pred_segments, target_segments)
+        
+        # Sinkhorn smoothing 
+        sinkhorn = ot.sinkhorn(pred_segments, target_segments, cost_matrix, self.epsilon)
+
+        # Optimal transport plan
+        transport_plan = sinkhorn.detach()
+
+        # Ot loss 
+        ot_loss = ot.sinkhorn_loss(
+            pred_segments, 
+            target_segments, 
+            cost_matrix, 
+            sinkhorn_iterations=100,
+            epsilon=self.epsilon
+        )
+
+        return ot_loss, transport_plan
+
+class BipartiteLoss:
+
+    def __init__(self, tau_init=1.0, tau_anneal=0.95):
+        self.tau_init = tau_init 
+        self.tau_anneal = tau_anneal
+    
+    def bipartite_matching_loss(self, pred_segments, target_segments, epoch=None, dist_fn='euclidean'):
+        """Compute bipartite matching loss between predicted and target segments.
+        
+        Args:
+        pred_segments: Tensor of shape (N, M, 2) with predicted segments
+        target_segments: Tensor of shape (N, K, 2) with target segments
+        dist_fn: Distance function to use for cost matrix (default 'euclidean')
+        
+        Returns:
+        Scalar loss value
+        """
+
+        N = pred_segments.shape[0] # Batch size
+        
+        # Initialize cost matrix
+        cost_matrix = torch.full_like(pred_segments, 1e6) 
+
+        # Compute actual costs
+        if dist_fn == 'euclidean':
+            cost_matrix = torch.cdist(pred_segments, target_segments, p=2)
+        elif dist_fn == 'dtw':
+            for i, pred in enumerate(pred_segments):
+                for j, target in enumerate(target_segments):
+                    cost_matrix[i,j] = dtw_distance(pred, target)
+
+        if torch.isnan(cost_matrix).any() or torch.isinf(cost_matrix).any():
+            logging.INFO("Warning: cost matrix contains NaN or Inf values!")
+            print("Cost matrix min:", torch.min(cost_matrix))
+            print("Cost matrix max:", torch.max(cost_matrix))
+            import pdb; pdb.set_trace()
+
+        tau = max(self.tau_init * (self.tau_anneal**epoch), 0.5) 
+
+        # Flatten and sample indices
+        sampled_rows, sampled_cols, prob_matrix = self.flatten_and_sample(cost_matrix, tau)
+
+        # Gather segments
+        matched_pred_segments = torch.gather(pred_segments, 1, sampled_rows[...,None])
+        matched_target_segments = torch.gather(target_segments, 1, sampled_cols[...,None])
+
+        # Losses
+        reinforce_loss = nn.NLLLoss()(torch.log(prob_matrix), sampled_rows.squeeze(-1)) 
+        match_loss = torch.mean((matched_pred_segments - matched_target_segments)**2)
+        
+        # Total loss 
+        loss = reinforce_loss + match_loss
+        
+        return loss
+    
+    def flatten_and_sample(self, cost_matrix, tau):
+
+        batch_size, num_segments, _ = cost_matrix.shape
+        
+        # Make contiguous
+        cost_matrix = cost_matrix.contiguous()
+        
+        # Softmax probabilities
+        prob_matrix = F.softmax(-cost_matrix / tau, dim=2)
+
+        # Sample indices
+        sampled_rows = ReshapeSampler.apply(prob_matrix, (batch_size, num_segments)) 
+        sampled_cols = ReshapeSampler.apply(prob_matrix.transpose(1,2), (batch_size, num_segments))
+
+        return sampled_rows, sampled_cols, prob_matrix
+    
+
+
+
+'''
+
+
+    def flatten_and_sample(self, cost_matrix, tau):
+        
+        batch_size, num_segments, _ = cost_matrix.shape
+        
+        # Make contiguous
+        cost_matrix = cost_matrix.contiguous()
+        
+        # Softmax probabilities
+        prob_matrix = F.softmax(-cost_matrix / tau, dim=2)
+
+        # Flatten 
+        flat_probs = prob_matrix.view(batch_size * num_segments, cost_matrix.shape[2])
+        
+        # Sample indices
+        sampled_rows = torch.multinomial(flat_probs, num_samples=1)
+        sampled_cols = torch.multinomial(flat_probs.t(), num_samples=1)
+        
+        # Reshape indices
+        sampled_rows = sampled_rows.view(batch_size, num_segments)
+        sampled_cols = sampled_cols.view(batch_size, num_segments)
+        
+        return sampled_rows, sampled_cols, prob_matrix
+
+
+        # import pdb; pdb.set_trace()
+
+        # # Apply softmax to get assignment probabilities
+        # prob_matrix = F.softmax(-cost_matrix / tau, dim=1)
+
+        # # Flatten batch and segment dims
+        # flat_probs = prob_matrix.view(prob_matrix.shape[0] * prob_matrix.shape[1], prob_matrix.shape[2])
+
+        # # Sample indices
+        # assigned_rows = torch.multinomial(flat_probs, num_samples=1) 
+
+        # # Reshape back to add batch dim
+        # assigned_rows = assigned_rows.view(prob_matrix.shape[0], -1)
+
+        # col_prob_matrix = prob_matrix.transpose(1,2)
+
+        # # Flatten batch and segment dims
+        # flat_probs = col_prob_matrix.view(prob_matrix.shape[0] * prob_matrix.shape[1], prob_matrix.shape[2])
+
+        # # Sample indices
+        # assigned_cols = torch.multinomial(flat_probs, num_samples=1) 
+
+        # # Reshape back to add batch dim
+        # assigned_cols = assigned_rows.view(col_prob_matrix.shape[0], -1)
+        
+        # # # Sample indices from distribution
+        # # assigned_rows = torch.multinomial(prob_matrix, num_samples=1)    
+        # # assigned_cols = torch.multinomial(prob_matrix.transpose(1,0), num_samples=1)
+        
+        # # Gather segments using sampled indices
+        # matched_pred_segments = torch.gather(pred_segments, 1, assigned_rows[:, :, None])
+        # matched_target_segments = torch.gather(target_segments, 1, assigned_cols[:, :, None]) 
+
+'''
+
+def chamfer_distance(pred_segments, target_segments):
+    
+    # Flatten batches into single sets
+    pred_segments = pred_segments.view(-1, 2)  
+    target_segments = target_segments.view(-1, 2)
+    
+    # Compute nearest neighbor distances    
+    pred_dists, _ = torch.cdist(pred_segments, target_segments).min(dim=1)  
+    target_dists, _ = torch.cdist(target_segments, pred_segments).min(dim=1)
+
+    # Mean losses
+    pred_loss = pred_dists.mean() 
+    target_loss = target_dists.mean()
+     
+    # Chamfer distance
+    loss = pred_loss + target_loss
+
+    return loss
 
 class LossFunctions:
     def __init__(self, loss_type, horizon, tb_logger):
@@ -75,6 +318,7 @@ class LossFunctions:
             'upd': self.custom_loss_upd,
             'geometric_consistency': self.custom_loss_geom_consistency, 
             'geometric_bayesian': self.custom_loss_geom_bayesian, 
+            'geometric_bayesian_weighted': self.custom_loss_geom_bayesian_weighted,
             'geometric_bayesian_profit_penalty': self.custom_loss_geom_bayesian_profit, 
             'geo_bayesian_profit_constrained': self.custom_loss_geom_bayesian_profit_constrained
         }
@@ -83,6 +327,7 @@ class LossFunctions:
         self.losses = {}  # to store loss values
         self.horizon = horizon
         self.geom_lossfn = GeometricConsistencyLoss(1.0, horizon)
+        self.bipartite = BipartiteLoss()
 
     def get_loss_function(self):
         return self.loss_functions.get(self.loss_type, self.custom_loss_vanilla)  # Default to vanila if not found
@@ -109,6 +354,71 @@ class LossFunctions:
             matched_targets = target_segments[i][target_indices]
             losses[i] = torch.sum((matched_preds - matched_targets) ** 2)  # Assuming L2 loss
         return losses.mean()  
+
+
+    # def bipartite_matching_loss(self, pred_segments, target_segments, dist_fn='euclidean'):
+    #     """Compute bipartite matching loss between predicted and target segments.
+        
+    #     Args:
+    #     pred_segments: Tensor of shape (N, M, 2) with predicted segments
+    #     target_segments: Tensor of shape (N, K, 2) with target segments
+    #     dist_fn: Distance function to use for cost matrix (default 'euclidean')
+        
+    #     Returns:
+    #     Scalar loss value
+    #     """
+
+    #     N = pred_segments.shape[0] # Batch size
+        
+    #     # Initialize cost matrix
+    #     cost_matrix = torch.full_like(pred_segments, 1e6) 
+
+    #     # Compute actual costs
+    #     if dist_fn == 'euclidean':
+    #         cost_matrix = torch.cdist(pred_segments, target_segments, p=2)
+    #     elif dist_fn == 'dtw':
+    #         for i, pred in enumerate(pred_segments):
+    #             for j, target in enumerate(target_segments):
+    #                 cost_matrix[i,j] = dtw_distance(pred, target)
+
+    #     if torch.isnan(cost_matrix).any() or torch.isinf(cost_matrix).any():
+    #         logging.INFO("Warning: cost matrix contains NaN or Inf values!")
+    #         print("Cost matrix min:", torch.min(cost_matrix))
+    #         print("Cost matrix max:", torch.max(cost_matrix))
+    #         import pdb; pdb.set_trace()
+
+    #     # Find optimal assignment 
+    #     batch_size, n, m = cost_matrix.shape
+
+    #     # Reshape to 2D matrix (BATCH_SIZE * N, M) 
+    #     cost_matrix = cost_matrix.reshape(batch_size * n, m) 
+
+    #     # Compute assignment
+    #     assignment = linear_sum_assignment(cost_matrix.cpu().detach().numpy())
+
+    #     # Reshape assignment indices to add batch dim back
+    #     assignment = np.array(assignment).reshape(batch_size, 2)
+
+    #         # Reshape assigned row/col indices to add batch dim back
+    #     assigned_rows = torch.LongTensor(assignment[0]).view(batch_size, n)
+    #     assigned_cols = torch.LongTensor(assignment[1]).view(batch_size, n)
+        
+    #     # Extract assigned segments using torch ops
+    #     matched_pred_segments = torch.gather(pred_segments, 1, assigned_rows.unsqueeze(-1).expand(-1, -1, 2))
+    #     matched_target_segments = torch.gather(target_segments, 1, assigned_cols.unsqueeze(-1).expand(-1, -1, 2))
+
+    #     # Compute loss between assigned segments
+    #     loss = torch.mean(torch.sum((matched_pred_segments - matched_target_segments)**2, dim=2))
+            
+    #     # # Gather matched segments using assignment
+    #     # matched_pred_segments = pred_segments[range(N), assignment[0]]
+    #     # matched_target_segments = target_segments[range(N), assignment[1]]
+
+    #     # # Compute average L2 distance between matched segments
+    #     # loss = torch.mean(torch.sum((matched_pred_segments - matched_target_segments) ** 2, dim=1))
+        
+    #     return loss
+    
 
 
     def custom_loss_vanilla(self, y_segments, y_profit, y_prices, pred_segments, pred_profit, pred_prices, **kwargs):
@@ -422,11 +732,74 @@ class LossFunctions:
                        'buy_loss': buy_loss,
                        'total_loss': total_loss}
         return total_loss
+    
+    def custom_loss_geom_bayesian_weighted(self,  y_true_segments, y_true_heights, y_true_angles, y_true_profit, y_true_prices, 
+                                           y_pred_segments, y_pred_angles,  y_pred_profit,  y_pred_prices,  
+                                           epoch=None, sigma=1.0):
+        geom_loss = self.geom_lossfn(y_true_profit, y_pred_profit, y_pred_angles, y_pred_segments)
+        sin_angles, cos_angles = y_pred_angles[..., 0], y_pred_angles[..., 1]
+        # pred_tan_angles = sin_angles/(cos_angles + 1e-08)
+        pred_angles = torch.arctan2(sin_angles, cos_angles)
+        angle_loss = nn.MSELoss()(y_true_angles, pred_angles)
+        # segment_loss = self.bipartite_matching_loss(y_true_segments, y_pred_segments, dist_fn='cdist')
+        segment_loss = chamfer_distance(y_pred_segments, y_true_segments)
+        # segment_loss = OptimalTransportLoss()(y_true_segments, y_pred_segments)
+        # segment_loss = self.bipartite.bipartite_matching_loss(y_true_segments, y_pred_segments, epoch=epoch)
+        profit_loss = nn.MSELoss()(y_true_profit, y_pred_profit)
+        # price_loss = nn.MSELoss()(y_true_prices, y_pred_prices[1])
+
+        time_decay = torch.exp(-torch.arange(y_pred_prices[0].shape[-1]).float() / sigma).cuda()  # Exponential decay
+        weighted_price_loss = (time_decay * nn.MSELoss(reduction='none')(y_pred_prices[0], y_true_prices).mean(dim=0)).sum()
+
+        bayesian_price_loss = bayesian_loss_function(y_true_prices, y_pred_prices[0], y_pred_prices[1])
+        total_loss = (7/8)*(segment_loss + geom_loss + weighted_price_loss + angle_loss + profit_loss) + (1/8)*bayesian_price_loss
+        # total_loss = LossWithExponentialPreference(0.8)(weighted_price_loss, geom_loss, segment_loss, angle_loss, bayesian_price_loss)
+        # total_loss = weighted_price_loss + geom_loss + segment_loss +angle_loss + bayesian_price_loss + profit_loss
+        self.losses = {'segment_loss': segment_loss, 
+                       'profit_loss': profit_loss, 
+                       'price_loss': weighted_price_loss,
+                       'bayesian_price_loss': bayesian_price_loss,
+                       'angle_loss': angle_loss, 
+                       'geom_loss': geom_loss, 
+                       'total_loss': total_loss}
+        return total_loss
+    
+    def custom_loss_geom_bayesian_profit_weighted(self,  y_true_segments, y_true_heights, y_true_angles, y_true_profit, y_true_prices, 
+                                           y_pred_segments, y_pred_angles,  y_pred_profit,  y_pred_prices,  
+                                           epoch=None, sigma=1.0):
+        import pdb; pdb.set_trace()
+        # geom_loss = self.geom_lossfn(y_true_profit, y_pred_profit, y_pred_angles, y_pred_segments)
+        sin_angles, cos_angles = y_pred_angles[..., 0], y_pred_angles[..., 1]
+        # pred_tan_angles = sin_angles/(cos_angles + 1e-08)
+        pred_angles = torch.arctan2(sin_angles, cos_angles)
+        angle_loss = nn.MSELoss()(y_true_angles, pred_angles)
+        # segment_loss = self.bipartite_matching_loss(y_true_segments, y_pred_segments, dist_fn='cdist')
+        segment_loss = chamfer_distance(y_pred_segments, y_true_segments)
+        # segment_loss = OptimalTransportLoss()(y_true_segments, y_pred_segments)
+        # segment_loss = self.bipartite.bipartite_matching_loss(y_true_segments, y_pred_segments, epoch=epoch)
+        profit_loss = nn.MSELoss()(y_true_profit, y_pred_profit.sum(axis=-1))
+        # price_loss = nn.MSELoss()(y_true_prices, y_pred_prices[1])
+
+        time_decay = torch.exp(-torch.arange(y_pred_prices[0].shape[-1]).float() / sigma).cuda()  # Exponential decay
+        weighted_price_loss = (time_decay * nn.MSELoss(reduction='none')(y_pred_prices[0], y_true_prices).mean(dim=0)).sum()
+
+        bayesian_price_loss = bayesian_loss_function(y_true_prices, y_pred_prices[0], y_pred_prices[1])
+        total_loss = (7/8)*(segment_loss + geom_loss + weighted_price_loss + angle_loss + profit_loss) + (1/8)*bayesian_price_loss
+        # total_loss = LossWithExponentialPreference(0.8)(weighted_price_loss, geom_loss, segment_loss, angle_loss, bayesian_price_loss)
+        # total_loss = weighted_price_loss + geom_loss + segment_loss +angle_loss + bayesian_price_loss + profit_loss
+        self.losses = {'segment_loss': segment_loss, 
+                       'profit_loss': profit_loss, 
+                       'price_loss': weighted_price_loss,
+                       'bayesian_price_loss': bayesian_price_loss,
+                       'angle_loss': angle_loss, 
+                       'geom_loss': geom_loss, 
+                       'total_loss': total_loss}
+        return total_loss
 
 def bayesian_loss_function(y_true, mean, std):
     normal_distribution = Normal(mean, std)
-    negative_log_likelihood = normal_distribution.log_prob(y_true)
-    return -negative_log_likelihood.mean()
+    log_likelihood = normal_distribution.log_prob(y_true) 
+    return -log_likelihood.mean()
     
 def dtw_distance(seqA, seqB):
     distance, path = fastdtw(seqA, seqB, dist=euclidean)

@@ -280,8 +280,9 @@ def save_results(mae, mse, rmse, filename):
     logging.info(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
 
 
-def fetch_and_preprocess_data(ticker="ETH-USD", start_date="2022-01-01", end_date="2022-10-01", time_interval="30m", period='2mo'):
+def fetch_and_preprocess_data(ticker="ETH-USD", start_date="2022-01-01", end_date="2022-10-01", time_interval="30m", period='2mo', run_dir=None):
     # Fetching the data
+    import pdb; pdb.set_trace()
     processed_data = seqTradeDataset.fetch_and_preprocess_data(
         ticker=ticker, 
         period=period, 
@@ -386,30 +387,35 @@ def main(args):
     hidden_dim = 64
     num_layers = 5
     input_dims = 18
-    processed_data = fetch_and_preprocess_data(ticker=Ticker, 
-                                                   start_date = start_date, 
-                                                   end_date = end_date, 
-                                                   time_interval = time_interval, 
-                                                   period = period)
-    # Creating the Dataset and DataLoader
-    eth_dataset = seqTradeDataset(processed_data, 
-                            window_size=window_size, 
-                            horizon=horizon, 
-                            add_angles=args.add_angle)
-    eth_dataloader = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
-    eth_dataloader_val = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
-    eth_dataloader_test = DataLoader(eth_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate)
 
-    # 9 is the features size
-    # 20 segments 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    checkpoint_path = os.path.join(CHECKPOINT_FOLDER,  f'{Ticker}_checkpoint_{current_datetime}.pth')
-
-    # Model setups
-    model =  make_model(name=args.model, input_dim=input_dims, hidden_dim=hidden_dim, num_layers=num_layers, num_segments=num_segments, future_timestamps=horizon, device=device) # increase hidden to 32 for bayes
-
-    model.train()
     if args.train:
+
+        processed_data = fetch_and_preprocess_data(ticker=Ticker, 
+                                                start_date = start_date, 
+                                                end_date = end_date, 
+                                                time_interval = time_interval, 
+                                                period = period, 
+                                                run_dir=run_dir)
+        # Creating the Dataset and DataLoader
+        eth_dataset = seqTradeDataset(processed_data, 
+                                window_size=window_size, 
+                                horizon=horizon, 
+                                add_angles=args.add_angle)
+        eth_dataloader = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
+        eth_dataloader_val = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
+        eth_dataloader_test = DataLoader(eth_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate)
+
+        # 9 is the features size
+        # 20 segments 
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        checkpoint_path = os.path.join(CHECKPOINT_FOLDER,  f'{Ticker}_checkpoint_{current_datetime}.pth')
+
+        # Model setups
+        model =  make_model(name=args.model, input_dim=input_dims, hidden_dim=hidden_dim, num_layers=num_layers, num_segments=num_segments, future_timestamps=horizon, device=device) # increase hidden to 32 for bayes
+
+        model.train()
+
+
         logging.info("training the model")
         copy_files(SCRIPTS_FOLDER)
         
@@ -490,6 +496,7 @@ def main(args):
         print("done")
 
     elif args.eval:
+        # global run_dir
         logging.info("Testing started")
         experiment_location = os.path.join(os.path.dirname(args.checkpoint_path), "..")
         TESTING_FOLDER = os.path.join(experiment_location, 'testing')
@@ -503,9 +510,34 @@ def main(args):
         tblog_experiment_folder = log_folder_names[0]
         tb_dir = os.path.join(tb_log_dir, tblog_experiment_folder)
         tb_logger = TensorBoardLogger(tb_dir)
-        loss_fn = LossFunctions('geometric_bayesian', tb_logger=tb_logger, horizon=horizon)
+        loss_fn = LossFunctions('geometric_bayesian_weighted', tb_logger=tb_logger, horizon=horizon)
         criterion = loss_fn.get_loss_function()
         
+        run_dir = experiment_location
+
+        processed_data = fetch_and_preprocess_data(ticker=Ticker, 
+                                                start_date = start_date, 
+                                                end_date = end_date, 
+                                                time_interval = time_interval, 
+                                                period = period, run_dir =experiment_location)
+        # Creating the Dataset and DataLoader
+        eth_dataset = seqTradeDataset(processed_data, 
+                                window_size=window_size, 
+                                horizon=horizon, 
+                                add_angles=args.add_angle)
+        eth_dataloader = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
+        eth_dataloader_val = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
+        eth_dataloader_test = DataLoader(eth_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate)
+
+        # 9 is the features size
+        # 20 segments 
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        checkpoint_path = os.path.join(CHECKPOINT_FOLDER,  f'{Ticker}_checkpoint_{current_datetime}.pth')
+
+        # Model setups
+        model =  make_model(name=args.model, input_dim=input_dims, hidden_dim=hidden_dim, num_layers=num_layers, num_segments=num_segments, future_timestamps=horizon, device=device) # increase hidden to 32 for bayes
+
+        model.eval()
         # Ensure these directories exist
         os.makedirs(PLOT_FOLDER, exist_ok=True)
         os.makedirs(TESTING_PLOT_FOLDER, exist_ok=True)

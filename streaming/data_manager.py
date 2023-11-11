@@ -8,9 +8,179 @@ import numpy as np
 import plotly.graph_objects as go
 import sqlite3 
 import random
-
+random.seed(42)  # Replace 42 with your desired seed value
+import sys
+sys.path.append("..")
+from scripts.data_process import seqTradeDataset, Scaling1d, Solver
+from scripts.models import make_model
+import torch
+import joblib
+import os
 def hash_sqlite3_connection(conn):
     return id(conn)  # or some other way of uniquely identifying the connection objec
+
+
+class ModelInference:
+    def __init__(self, model_name, checkpoint_path):
+        device = 'cuda'
+        self.model = make_model(name=model_name, input_dim=9, hidden_dim=64, num_layers=2, num_segments=20, future_timestamps=20, device=device)
+        # self.model.critera 
+        self.checkpoint_path = checkpoint_path
+        self.load_model(checkpoint_path)
+        self.run_inference = self.get_inferenece_fn(model_name)
+        self.segment_scaler = Scaling1d(min_data=0, max_data=15, min_range=0, max_range=1)
+        self.input_scaler = None
+
+    def get_inferenece_fn(self, name):
+        """Fetch the model by matching the name and creating the object and returning"""
+        model_classes = {
+            'SegmentBayesianHeadingModel': self.run_inference_bayesian_heading
+        }
+        
+        if name in model_classes:
+            return model_classes[name]
+        else:
+            raise ValueError(f"Model name {name} not recognized!")
+
+    def load_model(self, model_path):
+        try:
+            self.model.load_state_dict(torch.load(model_path))
+            self.model.eval()
+            return self.model
+        except Exception as e:
+            raise ValueError(f"Failed to load the model: {e}")
+    
+    
+    # def postprocess_data(self, output):
+    #     # Convert tensor to NumPy array
+    #     sin_angles, cos_angles = y_pred_angles[..., 0], y_pred_angles[..., 1]
+    #     pred_angles = torch.arctan2(sin_angles, cos_angles)
+    #     ex_pred_mean, ex_pred_std = outputs[3][0][-1, :], outputs[3][1][-1, :] # closing price selecting the last one
+    #     ex_inp, ex_tgt, ex_pred_mean, ex_pred_std = self.extract_numpy(ex_inp, ex_tgt, ex_pred_mean, ex_pred_std)
+    #     ex_pred_low = ex_pred_mean - ex_pred_std
+    #     ex_pred_high = ex_pred_mean + ex_pred_std
+    #     ex_inp, ex_tgt, ex_pred_low, ex_pred_high, ex_pred_mean = self.inverse_scale(ex_inp, ex_tgt, ex_pred_low, ex_pred_high, ex_pred_mean, column_idx=self.column_idx)
+    #     return output_array
+    
+    def postprocess_data(self, model_output):
+        # Assume model_output is a tuple of tensors
+        y_pred_segments, y_pred_angles, y_pred_profit, y_pred_prices = model_output
+        sin_angles, cos_angles = y_pred_angles[..., 0], y_pred_angles[..., 1]
+        y_pred_angles = torch.arctan2(sin_angles, cos_angles)
+
+        # Convert tensors to NumPy arrays
+        y_pred_segments = y_pred_segments.cpu().detach().numpy()
+        y_pred_angles = y_pred_angles.cpu().detach().numpy()
+        y_pred_profit = y_pred_profit.cpu().detach().numpy()
+        # y_pred_prices = y_pred_prices.cpu().detach().numpy()  # Assume this contains mean, low, and high prices
+
+        # For simplicity, let's assume y_pred_prices has shape (3, N)
+        mean, std = y_pred_prices
+
+        y_pred_low = mean-std 
+        y_pred_high = mean+std 
+        y_pred_mean = mean.cpu().detach().numpy()
+        y_pred_low = y_pred_low.cpu().detach().numpy()
+        y_pred_high = y_pred_high.cpu().detach().numpy()
+        
+
+        dir = os.path.join(os.path.split(self.checkpoint_path)[0], "..")
+        input_scaler_list = joblib.load(os.path.join(dir, 'input_scaler_list.pkl'))
+        input_scaler = joblib.load(os.path.join(dir, 'input_scaler.pkl'))
+        # inverse scale
+        y_pred_mean, y_pred_low, y_pred_high = self.inverse_scale(y_pred_mean, y_pred_low, y_pred_high, scaler_list=input_scaler_list)
+        # Now you have the data in a usable format, you can return it as needed
+        return y_pred_segments, y_pred_angles, y_pred_profit, y_pred_mean, y_pred_low, y_pred_high
+
+    def preprocess_dataset(self, data, ticker):
+        if not len(data):
+            print(f"No data fetched for ticker: {ticker}")
+            return None
+        data = seqTradeDataset.feature_engineering(data)
+        dir = os.path.join(os.path.split(self.checkpoint_path)[0], "..")
+        scaled_data, scaler, date = seqTradeDataset.preprocess_data(data, load_scaler=dir)
+        self.input_scaler = scaler
+        return scaled_data, scaler, date
+    
+    def prune_for_horizon(self, data, window_size, horizon):
+        # Ensure the data is sorted by datetime index in ascending order
+        # attach index to the df
+        data = data.sort_index(ascending=True)
+        # import pdb; pdb.set_trace()s
+        # Calculate the starting index for pruning
+        start_idx = len(data) - window_size - horizon -400
+        
+        # Ensure the start index is not negative
+        start_idx = max(0, start_idx)
+        
+        # Prune the data
+        pruned_data = data.iloc[start_idx:start_idx + window_size]
+        
+        return pruned_data, start_idx
+    # def check_model_compatability():
+    #     # if length of the data in rows and timetstamp is not compatible with the model window, future timesteps then fit it otherwise skipZ
+    #     # write checks for criteria 
+        
+    def preprocess_data(self, data, ticker):
+        # check if the window is suffcient i.e model window input is 
+        horizon = 15
+        window_size = 30
+        
+        data_features, scaler, date = self.preprocess_dataset(data, ticker)
+        data_to_prune = pd.DataFrame(data=data_features, index=data.index) # add the index of date time to sort
+        data_features, start_idx=self.prune_for_horizon(data_to_prune, window_size, horizon)
+        data_features= data_features.to_numpy() # removes the index of datetimeand and makes numpy
+        # max_profit, segments = Solver.gen_transactions(Solver(), data_features[3], k=20)
+        # # Check if seg represents a single segment or multiple segments
+        # segments = seqTradeDataset.ensure_dimension(segments)
+        # segments.sort(key=lambda i:i[0])
+
+        # scaled_segments = self.segment_scale.scale(segments)
+        input_tensor = torch.tensor(data_features, dtype = torch.float32)
+        segments_tensor = torch.tensor(data_features, dtype = torch.float32)
+        # check if the input tensor has batch size 1
+
+        return input_tensor, segments_tensor, start_idx
+    
+    # def run_inference_bayesian_heading(self, data ,ticker, only_futures = True ):
+    #     preprocessed_data = self.preprocess_data(data, ticker)
+    #     with torch.no_grad():
+    #         model_output = self.model(preprocessed_data) # prices have mean and std vectors in the tensor
+
+    #     y_pred_segments, y_pred_angles,  y_pred_profit,  y_pred_prices_low, y_pred_prices_high, y_pred_prices_mean  = self.postprocess_data(model_output)
+    #     outputs = [y_pred_segments, y_pred_angles,  y_pred_profit,  y_pred_prices_low, y_pred_prices_high, y_pred_prices_mean ]
+    #     # next plot the pred prices
+    #     return outputs 
+    
+    def run_inference_bayesian_heading(self, data, ticker, only_futures=True):
+        preprocessed_data, segments_tensor, start_idx = self.preprocess_data(data, ticker)
+        # add the batch dimension 
+
+        preprocessed_data = preprocessed_data[:, None, ...].cuda()
+        with torch.no_grad():
+            model_output = self.model(preprocessed_data)  # Assume model takes two inputs, adjust as necessary
+
+        outputs = self.postprocess_data(model_output)
+
+        return outputs, start_idx
+    
+    @staticmethod
+    def inverse_scale(*args, column_idx=3, scaler_list=None):
+        out = []
+        dataset = seqTradeDataset([], just_init=True) # mock dataset
+
+        for arg in args:
+            out.append( dataset.inverse_transform_predictions(arg, column_idx=column_idx, scaler_list=scaler_list)  )
+        return out
+    
+def setup_ml():
+    # Load the trained model
+    model_name = 'SegmentBayesianModel'  # Replace with the name of the model you want to use
+    input_dim, hidden_dim, num_layers, num_segments, device = 10, 128, 2, 20, 'cpu'  # Replace with your actual parameters
+    model = make_model(model_name, input_dim, hidden_dim, num_layers, num_segments, device)
+    model.load_state_dict(torch.load('path/to/your/saved/model.pth'))
+    model.eval()
+
 
 class DataManager:
     def __init__(self, ticker, period='1d', interval='1m'):
@@ -43,7 +213,7 @@ class DataManager:
 
 
     @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
-    def get_price_data_from_api(self):
+    def get_price_data_from_api(self): #ticker period interval
         try:
             data = yf.Ticker(self.ticker).history(period=self.period, interval=self.interval)
             return data
@@ -393,7 +563,105 @@ class DataManager:
             col=2
         )
 
+    def plot_predicted_prices(self, price_data, y_pred_prices_mean, y_pred_prices_low, y_pred_prices_high, fig, row_idx, start_idx):
+        # Create x values (indices) for the predicted prices
+        # import pdb; pdb.set_trace()
+        x_indices = list(range(start_idx, start_idx+len(y_pred_prices_mean)))
+        # import pdb; pdb.set_trace()
+        # Plot mean predicted prices
+        if len(y_pred_prices_mean.shape) == 2:
+            y_pred_prices_mean = y_pred_prices_mean.reshape(-1)
+            y_pred_prices_low = y_pred_prices_low.reshape(-1)
+            y_pred_prices_high = y_pred_prices_high.reshape(-1)
+            
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=y_pred_prices_mean,
+                line=dict(color=self.random_color()),
+                customdata=price_data.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                mode='lines',
+                name='Mean Predicted Prices'
+            ),
+            row=row_idx,
+            col=1  # Assuming you want to plot in the second column
+        )
 
+        # Plot high predicted prices
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=y_pred_prices_high,
+                line=dict(color=self.random_color()),
+                customdata=price_data.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                mode='lines',
+                name='High Predicted Prices',
+                fill=None  # No fill for the high prices trace
+            ),
+            row=row_idx,
+            col=1  # Assuming you want to plot in the second column
+        )
+
+        # Plot low predicted prices
+        fig.add_trace(
+            go.Scatter(
+                x=x_indices,
+                y=y_pred_prices_low,
+                line=dict(color=self.random_color()),
+                customdata=price_data.index,
+                hovertemplate='%{customdata}: %{y}<extra></extra>',
+                mode='lines',
+                name='Low Predicted Prices',
+                fill='tonexty'  # Fill the area between this trace and the previous trace
+            ),
+            row=row_idx,
+            col=1  # Assuming you want to plot in the second column
+        )
+        return fig  # Return the updated fig object
+
+    def plot_predicted_segments(self, price_data, y_pred_segments, y_pred_angles, fig, row_idx, start_idx, zoom_range):
+        
+        y_pred_segments = prune_predictions(y_pred_segments)
+        # Plotting segments
+        for i, segment in enumerate(y_pred_segments):
+            start_idx, end_idx = segment  # Assuming segments are tuples/lists of start and end indices
+            segment_slope = y_pred_angles[i]
+            x_segment = [start_idx, end_idx]
+            y_segment = [price_data[start_idx], price_data[start_idx] + (end_idx - start_idx) * segment_slope]
+            fig.add_trace(
+                go.Scatter(
+                    x=x_segment,
+                    y=y_segment,
+                    mode='lines',
+                    line=dict(color='blue', width=2),
+                    name=f'Segment {i+1}'
+                ),
+                row=row_idx,
+                col=2
+            )
+
+        
+
+        return fig
+
+
+def prune_predictions(arr):
+    # Clamp values to be within 0 and 14
+    arr_clamped = np.clip(arr, 0, 14)
+    
+    # Split the array into fractional and integer parts
+    integer_parts, fractional_parts = np.divmod(arr_clamped, 1)
+    
+    # Round down or up based on the fractional part
+    rounded_down = np.floor(arr_clamped)
+    rounded_up = np.ceil(arr_clamped)
+    
+    # If fractional part is <= 0.5, use rounded_down, else use rounded_up
+    pruned_indices = np.where(fractional_parts <= 0.5, rounded_down, rounded_up)
+    
+    return pruned_indices
 # Usage:
 dm = DataManager('AAPL')
 dm.update_data()  # Call this method to update data

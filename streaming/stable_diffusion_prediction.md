@@ -1,0 +1,4 @@
+The problem with all this models is that it expects inputs based on variety of factors that contribute to the realtive movement of stock data every second, every day which is a hard task to collect the information in the given time to come up with a best guess. 
+Web scraping tools are available to extract updates from the web but in reality the internet is just a piece of the whole cake of causes for stock movement. A lot of research has already been gone through to create a model that could represent movement from these updates but a new method that seeks a different approach is needed.
+Assume that the world is markovian and only the past state matters in predicting the future given an appropriate prior. This prior in short context is easily extracted using lstms
+But what if we join lstm with diffusion.

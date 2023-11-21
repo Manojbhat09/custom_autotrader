@@ -10,7 +10,7 @@ from diffusers import StableDiffusionInpaintPipeline
 from datetime import datetime
 import os
 
-token =  #os.environ.get('HUGGINGFACE_TOKEN')
+token = "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" #os.environ.get('HUGGINGFACE_TOKEN')
 
 # Define device for model
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -19,7 +19,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model = CLIPDensePredT(version='ViT-B/16', reduce_dim=64).to(device)
 model.load_state_dict(torch.load('weights/rd64-uni.pth', map_location=device), strict=False)
 model.eval()
- 
+
 # Load Stable Diffusion Inpaint Pipeline
 pipe = StableDiffusionInpaintPipeline.from_pretrained(
     "CompVis/stable-diffusion-v1-4",
@@ -49,12 +49,11 @@ def save_image(image, prefix):
 image_url = 'https://okmagazine.ge/wp-content/uploads/2021/04/00-promo-rob-pattison-1024x1024.jpg'
 input_image = Image.open(requests.get(image_url, stream=True).raw).convert("RGB")
 img = transform(input_image).unsqueeze(0).to(device)
-
 # Save the input image
 init_image_path = save_image(input_image.resize((512, 512)), "init_image")
 
 # Prediction prompts
-prompts = ['shirt']
+prompts = ['hair']
 
 # Predict with the model
 with torch.no_grad():
@@ -77,8 +76,7 @@ init_image = Image.open(init_image_path)
 mask = Image.open(mask_filename_bw)
 
 with autocast(device):
-    import pdb; pdb.set_trace()
-    images = pipe(prompt="a blue floral holiday casual shirt", image=init_image, mask_image=mask, strength=0.8)["sample"]
+    images = pipe(prompt="a modern hairstyle", image=input_image, mask_image=mask, strength=0.8)
 
 # Save the inpainted image
 inpaint_image_path = save_image(images[0], "inpainted")

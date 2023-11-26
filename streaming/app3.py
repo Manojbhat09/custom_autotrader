@@ -29,7 +29,7 @@ macd_selected = st.sidebar.checkbox('MACD')
 bollinger_bands_selected = st.sidebar.checkbox('Bollinger Bands')  # Added as an example
 fibonacci_retracements_selected = st.sidebar.checkbox('Fibonacci Retracements')  # Added as an example
 ichimoku_cloud_selected = st.sidebar.checkbox('Ichimoku Cloud')  # Added as an example
-robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MENkeys796@09')
+robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
 
 config = {
     'scrollZoom': True, 
@@ -50,7 +50,6 @@ config = {
             ]
     }
 
-cache = PredictionCache()
 
 def get_robinhood_ticker_lists():
 

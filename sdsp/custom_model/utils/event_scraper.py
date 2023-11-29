@@ -10,6 +10,7 @@ import h5py
 import hashlib 
 import numpy as np
 import json
+from scraper import Config, EthereumNewsScraper
 
 ticker="ETHUSD"
 cache_file=f"{ticker}_news_data.hdf5".replace('/', '_')
@@ -212,9 +213,21 @@ class EventDataScraper:
         classified_events = self.get_news_data_and_sentiment(news_parsed)
         dataframe = self.generate_dataframe(news_parsed, classified_events, columns=['title', 'url', 'source', 'time', 'conv_time', 'headline', 'sentiment', 'classification', 'content'])
         return dataframe
+    
+    def classify_articles(self, news_parsed, ticker):
+        classified_events = self.get_news_data_and_sentiment(news_parsed)
+        dataframe = self.generate_dataframe(news_parsed, classified_events, columns=['title', 'url', 'source', 'time', 'conv_time', 'headline', 'sentiment', 'classification', 'content'])
+        return dataframe
+
 
 # Example usage
+# scraper = EventDataScraper(ticker)
+# df_events = scraper.fetch_and_classify_news()
+ticker = "ETHUSD"
+ethscraper = EthereumNewsScraper(api_key=Config.API_KEY)
+news_parsed = ethscraper.load_data(Config.JSON_SAVE_PATH)
 scraper = EventDataScraper(ticker)
-df_events = scraper.fetch_and_classify_news()
-df_events.to_csv('events_data.csv', index=False)
-df_events.to_hdf('events_data.h5', key='df', mode='w')
+df_events = scraper.classify_articles(news_parsed, ticker)
+
+df_events.to_csv(f'{ticker}_events_data.csv', index=False)
+df_events.to_hdf(f'{ticker}_events_data.h5', key='df', mode='w')

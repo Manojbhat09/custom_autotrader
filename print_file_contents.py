@@ -36,7 +36,7 @@ def main():
     main_script_path = 'train_crypto.py'
     
     # Output file name
-    output_file = 'local_modules.txt'
+    output_file = 'local_modules2.txt'
     
     # Extracting local modules
     local_modules = extract_local_modules(main_script_path)

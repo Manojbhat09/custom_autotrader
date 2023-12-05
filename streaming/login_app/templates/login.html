@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script>
+
+    function startApp() {
+            gapi.load('auth2', function() {
+            auth2 = gapi.auth2.init({
+                client_id: '293772337596-dj5sf0svltplja3gs9qfcq694etrk6ug.apps.googleusercontent.com',
+                fetch_basic_profile: true,
+                scope: 'profile email', 
+                plugin_name: 'hello' // very necessary, wont work without this, https://stackoverflow.com/questions/55068757/google-auth2-popup-closed-by-user
+            });
+
+            // Sign in the user if they are currently signed in.
+            if (auth2.isSignedIn.get()) {
+                var profile = auth2.currentUser.get().getBasicProfile();
+                console.log('ID: ' + profile.getId());
+                console.log('Name: ' + profile.getName());
+                console.log('Image URL: ' + profile.getImageUrl());
+                console.log('Email: ' + profile.getEmail());
+            } else {
+                // Attach the click handler to the sign-in button
+                auth2.attachClickHandler('signin-button', {}, onSuccess, onFailure);
+            }
+            });
+        }
+
+    // This function is called on successful Google sign-in
+    function onSuccess(googleUser) {
+        
+        console.log('Logged in as: ' + googleUser.getBasicProfile().getName());
+        var profile = googleUser.getBasicProfile();
+        console.log('ID: ' + profile.getId());
+        console.log('Name: ' + profile.getName());
+        console.log('Image URL: ' + profile.getImageUrl());
+        console.log('Email: ' + profile.getEmail());
+        
+        // Send the ID token to the Flask server
+        var id_token = googleUser.getAuthResponse().id_token;
+        fetch("/google-login", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ token: id_token })
+        })
+        .then(response => response.json())
+        .then(data => console.log(data));
+    }
+
+    function onFailure(error) {
+    console.log('Error:', error);
+  }
+
+    </script>
+</head>
+<body>
+    <button id="signin-button">Sign in with Google</button>
+    <script>startApp();</script>
+</body>
+</html>

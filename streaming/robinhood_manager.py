@@ -2,6 +2,7 @@
 import robin_stocks.robinhood as rh
 import streamlit as st
 import logging 
+import pandas as pd
 
 class RobinhoodManager():
     def __init__(self, username, password):
@@ -222,6 +223,35 @@ class RobinhoodManager():
             logging.error(f"Error getting real-time quote for {symbol}: {e}")
             print(e)
             return None
+
+    def get_real_time_crypto_data(self, ticker, debug=False):
+        """
+        Fetches the current crypto price along with other details like open, high, low, close prices, and volume
+        from the RobinhoodManager.
+        """
+        try:
+            crypto_quote = self.rh.get_crypto_quote(ticker)
+
+            current_data_point = {
+                'Timestamp': pd.Timestamp(crypto_quote['updated_at']),
+                'Open': float(crypto_quote['open_price']),
+                'High': float(crypto_quote['high_price']),
+                'Low': float(crypto_quote['low_price']),
+                'Close': float(crypto_quote['mark_price']),  # assuming mark price as close
+                'Volume': float(crypto_quote['volume']),
+            }
+
+            if debug:
+                print("[UPDATE] Current crypto data: ")
+                print(current_data_point)
+            return current_data_point
+
+        except Exception as e:
+            print(f" not able to get data ")
+            print(e)
+        return None
+            
+    
 
     def calculate_sharpe_ratio(self, returns, risk_free_rate=0.02):
         excess_returns = returns - risk_free_rate

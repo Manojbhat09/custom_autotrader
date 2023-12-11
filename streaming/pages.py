@@ -1,3 +1,5 @@
+
+
 import streamlit as st
 import pandas as pd
 import threading
@@ -6,7 +8,7 @@ from threading import Lock
 from robinhood_manager import RobinhoodManager
 import matplotlib.pyplot as plt
 import streamlit as st
-st.set_page_config(page_title="Login", layout='wide')
+# st.set_page_config(page_title="Login", layout='wide')
 from data_manager import DataManager, ModelInference
 from auth_manager import AuthManager, verify_token
 import plotly.subplots as sp
@@ -15,198 +17,19 @@ import numpy as np
 import random
 import time
 import sys
-sys.path.append("..")
-from scripts.models import make_model
+# from app import display_dashboard
+from auth_manager import AuthManager, verify_token
 
-import torch
-torch.manual_seed(42)  # Replace 42 with your desired seed value
-if torch.cuda.is_available():  # If you're using a GPU
-    torch.cuda.manual_seed_all(42)
-
-USE_ML = True
+robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
 auth = AuthManager()
-tickers = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'FB', 'TSLA', 'NFLX', 'SPY', 'BA']  # Your list of tickers
 time_frame = st.sidebar.selectbox("Select Time Frame", ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'])
 interval = st.sidebar.selectbox("Select Interval", ['1m', '5m', '15m', '30m', '60m', '1d'])
 indicators = st.sidebar.write("Addtional Indicators")
-# additional_indicator = st.sidebar.selectbox("Select Additional Indicator", ['None', 'RSI', 'MACD', 'Other'])
 rsi_selected = st.sidebar.checkbox('RSI')
 macd_selected = st.sidebar.checkbox('MACD')
 bollinger_bands_selected = st.sidebar.checkbox('Bollinger Bands')  # Added as an example
 fibonacci_retracements_selected = st.sidebar.checkbox('Fibonacci Retracements')  # Added as an example
 ichimoku_cloud_selected = st.sidebar.checkbox('Ichimoku Cloud')  # Added as an example
-robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
-
-config = {
-    'scrollZoom': True, 
-    'displayModeBar': True, 
-    'toImageButtonOptions': {
-            'format': 'svg', # one of png, svg, jpeg, webp
-            'filename': 'custom_image',
-            'height': 500,
-            'width': 700,
-            'scale': 1 # Multiply title/legend/axis/canvas sizes by this factor
-            }, 
-    'modeBarButtonsToAdd': ['drawline',
-            'drawopenpath',
-            'drawclosedpath',
-            'drawcircle',
-            'drawrect',
-            'eraseshape'
-            ]
-    }
-
-# Streamlit expects to run the script from top to bottom on each interaction.
-# Therefore, use session state to maintain state across interactions.
-# Initialize session state variables
-if 'trading_on' not in st.session_state:
-    st.session_state.trading_on = False
-if 'transactions' not in st.session_state:
-    st.session_state.transactions = pd.DataFrame(columns=['Time', 'Type', 'Price', 'Amount', 'Profit'])
-if 'streamed_data' not in st.session_state:
-    st.session_state.streamed_data = pd.DataFrame(columns=['time', 'price'])
-if 'data_lock' not in st.session_state:
-    st.session_state.data_lock = Lock()
-if 'update_event' not in st.session_state:
-    st.session_state.update_event = threading.Event()
-
-# Placeholder for your predictive model function
-def predictive_model():
-    # Implement your predictive model here
-    # This function should return a prediction based on your model
-    return np.random.random()
-
-# Placeholder for your trading decision function
-def trading_decision(prediction):
-    # Implement your decision-making logic here
-    # This function should return a decision based on the prediction
-    return "Buy" if prediction > 0.5 else "Sell"
-
-# Placeholder for your trade execution function
-def execute_trade(decision):
-    # Implement your trade execution logic here
-    # This function should return transaction details such as price and amount
-    return {'price': np.random.random(), 'amount': np.random.randint(1, 10)}
-
-# Placeholder for your profit calculation function
-def calculate_profit(transaction_details):
-    # Implement your profit calculation here
-    # This function should return the profit for the given transaction
-    return transaction_details['price'] * transaction_details['amount']
-
-
-# Data streaming function
-def stream_data():
-    # Simulate streaming by appending new data to the existing DataFrame
-    # In a real application, this would be replaced by reading from a CSV or data source
-    
-    with st.session_state.data_lock:
-        new_data = {'time': pd.Timestamp.now(), 'price': np.random.random()}
-        st.session_state.streamed_data = st.session_state.streamed_data.append(new_data, ignore_index=True)
-        st.experimental_rerun()
-
-# Report generation function
-def generate_report():
-    with st.session_state.data_lock:
-        # In a real application, more complex analysis and formatting would be done here
-        report = f"Report Generated at {pd.Timestamp.now()}\n"
-        report += f"Total Transactions: {len(st.session_state.transactions)}\n"
-        report += f"Recent Transactions:\n{st.session_state.transactions.tail()}\n"
-    return report
-
-# Functions to start and stop trading
-def start_trading():
-    with st.session_state.data_lock:
-        st.session_state.trading_on = True
-        st.session_state.update_event.clear()
-        st.session_state.trading_thread = threading.Thread(target=trading_algorithm, daemon=True)
-        st.script_run_ctx._add_script_run_ctx(st.session_state.trading_thread)
-        st.session_state.trading_thread.start()  # This will now complete because of the break in trading_algorithm
-
-# Modify the stop_trading function to ensure the thread stops properly
-def stop_trading():
-    with st.session_state.data_lock:
-        st.session_state.trading_on = False
-        st.session_state.update_event.set() # Signal the threads to stop
-        if st.session_state.trading_thread.is_alive():
-            st.session_state.trading_thread.join()
-
-# Trading function to be run in a separate thread
-def trading_algorithm():
-
-    while st.session_state.trading_on:
-        # Simulate data streaming
-        stream_data()
-
-        # Simulate a streaming data update
-        new_data = {'time': pd.Timestamp.now(), 'price': np.random.random()}
-        with st.session_state.data_lock:
-            st.session_state.streamed_data = st.session_state.streamed_data.append(new_data, ignore_index=True)
-
-        if not st.session_state.trading_on:
-            break
-
-        # Get the prediction from the model
-        prediction = predictive_model()
-        # Make a trading decision
-        decision = trading_decision(prediction)
-        # Execute the trade
-        transaction_details = execute_trade(decision)
-        # Calculate profit from the transaction
-        profit = calculate_profit(transaction_details)
-        # Update the transactions DataFrame
-        new_transaction = pd.DataFrame([{
-            'Time': pd.Timestamp.now(),
-            'Type': decision,
-            'Price': transaction_details['price'],
-            'Amount': transaction_details['amount'],
-            'Profit': profit
-        }])
-        with st.session_state.data_lock:
-            st.session_state.transactions = pd.concat([new_transaction, st.session_state.transactions], ignore_index=True)
-            # st.session_state.transactions = st.session_state.transactions.append(new_transaction, ignore_index=True)
-
-        # Signal that an update is available
-        st.session_state.update_event.set()
-
-        # Wait for the next interval
-        time.sleep(60)  # Assuming a 1-minute interval between trades
-
-# Function to generate a sample time series data
-def generate_time_series():
-    # Generate some sample data
-    time_index = pd.date_range('2020-01-01', periods=100, freq='D')
-    series = pd.Series(np.random.rand(100), index=time_index)
-    return series
-
-# Function to generate a sample transactions table
-def generate_transactions_table():
-    # Generate some sample transaction data
-    transactions = pd.DataFrame({
-        'Buy Amount': np.random.rand(10),
-        'Sell Amount': np.random.rand(10),
-        'Charge Amount': np.random.rand(10),
-    })
-    return transactions
-
-# Function to update the line chart and transaction table
-def update_dashboard():
-    while not st.session_state.update_event.is_set():
-        # Wait for an update signal
-        st.session_state.update_event.wait()
-
-        # Update the line chart
-        if not st.session_state.streamed_data.empty:
-            live_data = st.session_state.streamed_data.set_index('time')['price']
-            st.line_chart(live_data)
-
-        # Update the transactions table
-        if not st.session_state.transactions.empty:
-            transactions_table = st.session_state.transactions.tail(10)
-            st.table(transactions_table)
-
-        # Clear the update event
-        st.session_state.update_event.clear()
 
 def get_robinhood_ticker_lists():
 
@@ -221,6 +44,7 @@ def get_robinhood_ticker_lists():
             
     return ticker_lists_from_robinhood
 
+
 def display_login_page():
     st.sidebar.title("User Authentication")
     username = st.sidebar.text_input("Username")
@@ -229,24 +53,32 @@ def display_login_page():
     register_button = st.sidebar.button("Register")
     google_login_button = st.sidebar.button("Login with Google")  # Add this line
     
-    if login_button:
-        if auth.login(username, password):
-            st.session_state['logged_in'] = True
-            st.session_state['robinhood_manager'] = robinhood_manager
-            display_dashboard()
-        else:
-            st.sidebar.error("Invalid username or password.")
-    if register_button:
-        auth.register(username, password)
-        st.sidebar.success("Registered successfully.")
-    if google_login_button:  # Add this block
-        st.write("Redirecting to Google login...")
-        # Assuming your Flask app is running on http://localhost:5000
-        flask_login_url = "http://localhost:5000/login/google"
-        st.markdown(f'<meta http-equiv="refresh" content="0;url={flask_login_url}">', unsafe_allow_html=True)
-        st.write("Redirecting...")
-        # st.redirect(flask_login_url)
-        st.session_state['robinhood_manager'] = robinhood_manager
+
+        # Read HTML content
+    with open('login_app/templates/login.html', 'r') as file:
+        login_html = file.read()
+
+    # Use st.markdown to render HTML
+    st.markdown(login_html, unsafe_allow_html=True)
+
+    # if login_button:
+    #     if auth.login(username, password):
+    #         st.session_state['logged_in'] = True
+    #         st.session_state['robinhood_manager'] = robinhood_manager
+    #         display_dashboard()
+    #     else:
+    #         st.sidebar.error("Invalid username or password.")
+    # if register_button:
+    #     auth.register(username, password)
+    #     st.sidebar.success("Registered successfully.")
+    # if google_login_button:  # Add this block
+    #     st.write("Redirecting to Google login...")
+    #     # Assuming your Flask app is running on http://localhost:5000
+    #     flask_login_url = "http://localhost:5000/login/google"
+    #     st.markdown(f'<meta http-equiv="refresh" content="0;url={flask_login_url}">', unsafe_allow_html=True)
+    #     st.write("Redirecting...")
+    #     st.redirect(flask_login_url)
+    #     st.session_state['robinhood_manager'] = robinhood_manager
 
 def display_main_plotting_page():
 
@@ -279,7 +111,7 @@ def display_main_plotting_page():
                 if 'ETH' in ticker:
                     ticker_lists[crypto_list_name][idx] = 'ETH-USD'
 
-     # Pagination logic
+    # Pagination logic
     num_plots_perpage = 4
     page = st.sidebar.slider('Page:', 1, (len(tickers) + 2) // num_plots_perpage)
     start_idx = (page - 1) * num_plots_perpage
@@ -305,36 +137,36 @@ def display_main_plotting_page():
         # Price and Moving Average
         data_manager.plot_price_ma(ticker, price_data, fig, row_idx)
 
-        button_key = f'Predict Future Prices_{ticker}_{i}'  # Create a unique key for each button
-        if st.button('Predict Future Prices', key=button_key):
-            zoom_range = st.session_state.get('zoom_range', (len(price_data) - 100, len(price_data)))  # Default to last 100 data points
-            # The code above for running inference and plotting predicted prices
-            # Instantiate ModelInference
-            model_inference = ModelInference(model_name='SegmentBayesianHeadingModel', checkpoint_path='/home/mbhat/tradebot/custom_autotrader/run/experiment_20231103_162231/models/BTC-USD_checkpoint_experiment_20231103_162231.pth')
+        # button_key = f'Predict Future Prices_{ticker}_{i}'  # Create a unique key for each button
+        # if st.button('Predict Future Prices', key=button_key):
+        #     zoom_range = st.session_state.get('zoom_range', (len(price_data) - 100, len(price_data)))  # Default to last 100 data points
+        #     # The code above for running inference and plotting predicted prices
+        #     # Instantiate ModelInference
+        #     model_inference = ModelInference(model_name='SegmentBayesianHeadingModel', checkpoint_path='/home/mbhat/tradebot/custom_autotrader/run/experiment_20231103_162231/models/BTC-USD_checkpoint_experiment_20231103_162231.pth')
             
-            update_predictions(price_data=price_data, window_size=60, model_inference=model_inference, cache=cache)
-            cached_price_data = cache.cached_price_data()[-60:]  # Assuming prediction for last 60 data points
-            cached_segment_data = cache.cached_segment_data()
-            # Run inference
-            # if not model_inference.check_model_compatability(ticker, time_frame, interval):
-            #     skip with error logs and print out compatiablity criteria
+        #     update_predictions(price_data=price_data, window_size=60, model_inference=model_inference, cache=cache)
+        #     cached_price_data = cache.cached_price_data()[-60:]  # Assuming prediction for last 60 data points
+        #     cached_segment_data = cache.cached_segment_data()
+        #     # Run inference
+        #     # if not model_inference.check_model_compatability(ticker, time_frame, interval):
+        #     #     skip with error logs and print out compatiablity criteria
             
-            update_predictions(price_data=price_data, window_size=60, model_inference=model_inference, cache=cache)
-            # outputs, start_idx = model_inference.run_inference_bayesian_heading(price_data, ticker)
-            # # Get predicted prices
-            # y_pred_segments, y_pred_angles, y_pred_profit, y_pred_prices_mean, y_pred_prices_low, y_pred_prices_high = outputs
+        #     update_predictions(price_data=price_data, window_size=60, model_inference=model_inference, cache=cache)
+        #     # outputs, start_idx = model_inference.run_inference_bayesian_heading(price_data, ticker)
+        #     # # Get predicted prices
+        #     # y_pred_segments, y_pred_angles, y_pred_profit, y_pred_prices_mean, y_pred_prices_low, y_pred_prices_high = outputs
 
-            # Plot and display predicted prices
-            fig = data_manager.plot_predicted_prices(*cached_price_data(), fig, row_idx, start_idx)
-            fig = data_manager.plot_predicted_segments(*cached_segment_data(), fig, row_idx, start_idx, zoom_range)
+        #     # Plot and display predicted prices
+        #     fig = data_manager.plot_predicted_prices(*cached_price_data(), fig, row_idx, start_idx)
+        #     fig = data_manager.plot_predicted_segments(*cached_segment_data(), fig, row_idx, start_idx, zoom_range)
         
-            # Setting the x-axis range for zoom and space for horizon predictions
-            xaxis_range = [zoom_range[0], zoom_range[1] + 15]  # Assuming horizon predictions for next 15 data points
-            fig.update_xaxes(range=xaxis_range, row=row_idx, col=2)
+        #     # Setting the x-axis range for zoom and space for horizon predictions
+        #     xaxis_range = [zoom_range[0], zoom_range[1] + 15]  # Assuming horizon predictions for next 15 data points
+        #     fig.update_xaxes(range=xaxis_range, row=row_idx, col=2)
 
-            f'''
-            Max Profit predicted: {y_pred_profit[0]}
-            '''
+        #     f'''
+        #     Max Profit predicted: {y_pred_profit[0]}
+        #     '''
         
         # Additional Indicators
         if rsi_selected: # additional_indicator
@@ -447,6 +279,8 @@ def display():
         if st.button('Generate Report'):
             report = generate_report()
             st.text_area('Report', report, height=300)
+
+    
 
     # Main dashboard area
     with st.container():
@@ -564,39 +398,3 @@ def display_streaming_dashboard():
             st.session_state.report_generated = generate_report()
         st.text_area('Report', st.session_state.report_generated if 'report_generated' in st.session_state else '')
 
-
-# Function to display the dashboard
-def display_dashboard():
-    st.title("Advanced Trading Dashboard")
-
-    # Create a navigation menu to switch between pages
-    pages = ["Main Plotting Page", "Option Details Page", "Options List Page", "Streaming Trading Dashboard"]
-    selected_page = st.sidebar.selectbox("Select a Page", pages)
-
-    if selected_page == "Main Plotting Page":
-        # Display the main plotting page
-        display_main_plotting_page()
-    elif selected_page == "Option Details Page":
-        # Display the option details page
-        display_option_details_page()
-    elif selected_page == "Option List Page":
-        # Display the option details page
-        display_option_details_page()
-    elif selected_page == "Streaming Trading Dashboard":
-        display_streaming_dashboard()
-
-def main():
-    query_params = st.experimental_get_query_params()
-    token = query_params.get("token", None)
-    if token and verify_token(token):
-        display_dashboard()
-    else:
-        if 'logged_in' in st.session_state and st.session_state['logged_in']:
-            display_dashboard()
-        else:
-            st.write("Please login to access the dashboard.")
-            display_login_page()
-
-
-if __name__ == '__main__':
-    main()

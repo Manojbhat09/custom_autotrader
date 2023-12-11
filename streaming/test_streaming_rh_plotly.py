@@ -7,11 +7,12 @@ from datetime import datetime
 import random
 from robinhood_manager import RobinhoodManager
 import plotly.express as px
+from infer_toy import generate_predictions_rnn
 
 st.set_page_config(layout="wide")
 # Streamlit layout
 st.title('Streamlit Trading Dashboard')
-robinhood_manager = RobinhoodManager(username='', password='')
+robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
 
 def get_seconds_from_interval(interval):
     interval_mapping = {
@@ -99,7 +100,7 @@ def update_data_and_predictions():
     )
     
     # Generate new predictions
-    new_predictions = generate_predictions(new_data_point, st.session_state.data.iloc[-1]['Timestamp'])
+    new_predictions = generate_predictions_rnn(new_data_point, st.session_state.data.iloc[-1]['Timestamp'])
     st.session_state.predictions = new_predictions
 
 def gen_plot_figs():

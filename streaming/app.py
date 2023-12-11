@@ -27,15 +27,7 @@ from auth_manager import verify_token
 
 USE_ML = True
 tickers = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'FB', 'TSLA', 'NFLX', 'SPY', 'BA']  # Your list of tickers
-time_frame = st.sidebar.selectbox("Select Time Frame", ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'])
-interval = st.sidebar.selectbox("Select Interval", ['1m', '5m', '15m', '30m', '60m', '1d'])
-indicators = st.sidebar.write("Addtional Indicators")
 # additional_indicator = st.sidebar.selectbox("Select Additional Indicator", ['None', 'RSI', 'MACD', 'Other'])
-rsi_selected = st.sidebar.checkbox('RSI')
-macd_selected = st.sidebar.checkbox('MACD')
-bollinger_bands_selected = st.sidebar.checkbox('Bollinger Bands')  # Added as an example
-fibonacci_retracements_selected = st.sidebar.checkbox('Fibonacci Retracements')  # Added as an example
-ichimoku_cloud_selected = st.sidebar.checkbox('Ichimoku Cloud')  # Added as an example
 
 config = {
     'scrollZoom': True, 
@@ -207,19 +199,6 @@ def update_dashboard():
 
         # Clear the update event
         st.session_state.update_event.clear()
-
-def get_robinhood_ticker_lists():
-
-    all_watchlists = robinhood_manager.get_all_watchlists()
-    ticker_lists_from_robinhood = {}
-    for watchlist in all_watchlists['results']:
-        watchlist_name = watchlist['display_name']
-        # Assuming get_watchlist_by_name returns a list of symbols directly
-        symbols = robinhood_manager.get_watchlist_by_name(watchlist_name)
-        if symbols:  # Only add the list if it has symbols
-            ticker_lists_from_robinhood[watchlist_name] = symbols[:20]
-            
-    return ticker_lists_from_robinhood
 
 # Function to display the dashboard
 def display_dashboard():

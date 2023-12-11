@@ -1,3 +1,4 @@
+# Import necessary libraries
 import yfinance as yf
 import streamlit as st
 from bs4 import BeautifulSoup
@@ -8,40 +9,102 @@ import numpy as np
 import plotly.graph_objects as go
 import sqlite3 
 import random
-random.seed(42)  # Replace 42 with your desired seed value
 import sys
-sys.path.append("..")
-from scripts.data_process import seqTradeDataset, Scaling1d, Solver
-from scripts.models import make_model
 import torch
 import joblib
 import os
+
+# Adding the parent directory to the system path to access scripts
+sys.path.append("..")
+
+# Importing custom modules from the scripts directory
+from scripts.data_process import seqTradeDataset, InputPreprocessor, Scaling1d, Solver
+from scripts.models import make_model
+
+# Function to hash SQLite3 connections for caching in Streamlit
 def hash_sqlite3_connection(conn):
-    return id(conn)  # or some other way of uniquely identifying the connection objec
+    return id(conn)
 
+class Config:
+    # Configuration for model inference
+    MODEL_NAME = "SegmentBayesianHeadingModel" 
+    HORIZON = 15
+    WINDOW_SIZE = 30
+    DEVICE = 'cuda'
+    INPUT_DIMS = 9
+    HIDDEN_DIM = 64
+    NUM_LAYERS = 2
+    NUM_SEGMENTS = 20
+    BATCH_SIZE = 32
+    NUM_EPOCHS = 2000
+    LEARNING_RATE = 0.01
+    TIME_INTERVAL = "60m"
+    PERIOD = "1mo"
+    START_DATE = "2022-01-01"
+    END_DATE = "2022-10-01"
+    TICKER = "BTC-USD"
 
+    # Configuration for data manager
+    DEFAULT_TICKER = 'AAPL'
+    DEFAULT_PERIOD = '1d'
+    DEFAULT_INTERVAL = '1m'
+    SQLITE_DB_PATH = 'stock_data.db'
+    PRICE_PREDICTION_FUTURE_DAYS = 5
+
+    # Plotting configuration
+    PLOTLY_TEMPLATE = 'plotly_dark'
+    PLOT_MARGIN = dict(l=10, r=10, t=30, b=10)
+
+    # Configuration for yfinance
+    YFINANCE_TIMEOUT = 10
+
+    # Configuration for linear regression
+    LINEAR_REGRESSION_WINDOW = 5
+
+    # Configuration for technical indicators
+    MOVING_AVERAGE_WINDOW = 20
+    RSI_WINDOW = 14
+    MACD_FAST_PERIOD = 12
+    MACD_SLOW_PERIOD = 26
+    MACD_SIGNAL_PERIOD = 9
+
+    # Constants for scalers and paths
+    SCALER_DIR = ".."
+    CHECKPOINT_PATH = 'path/to/your/saved/model.pth'
+
+    # Miscellaneous
+    RANDOM_SEED = 42
+    STREAMLIT_CACHE_HASH_FUNCS = {sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection}
+
+# Setting a seed for random number generation for consistency
+random.seed(Config.RANDOM_SEED)
+
+# ModelInference class to handle model loading and inference
 class ModelInference:
-    def __init__(self, model_name, checkpoint_path):
-        device = 'cuda'
-        self.model = make_model(name=model_name, input_dim=9, hidden_dim=64, num_layers=2, num_segments=20, future_timestamps=20, device=device)
-        # self.model.critera 
+    def __init__(self, model_name, checkpoint_path, config=None):
+        # Initialize the model with specified parameters
+        if config:
+            Config = config
+        device = Config.DEVICE
+        if not model_name:
+            model_name = Config.MODEL_NAME
+        self.model = make_model(name=model_name, input_dim=Config.INPUT_DIMS, hidden_dim=Config.HIDDEN_DIM, num_layers=Config.NUM_LAYERS, num_segments=Config.NUM_SEGMENTS, future_timestamps=Config.HORIZON, device=device)
+
         self.checkpoint_path = checkpoint_path
         self.load_model(checkpoint_path)
-        self.run_inference = self.get_inferenece_fn(model_name)
+        self.run_inference = self.get_inference_fn(model_name)
         self.segment_scaler = Scaling1d(min_data=0, max_data=15, min_range=0, max_range=1)
         self.input_scaler = None
 
-    def get_inferenece_fn(self, name):
-        """Fetch the model by matching the name and creating the object and returning"""
-        model_classes = {
-            'SegmentBayesianHeadingModel': self.run_inference_bayesian_heading
-        }
-        
+    # Method to get the inference function based on the model name
+    def get_inference_fn(self, name):
+        model_classes = {'SegmentBayesianHeadingModel': self.run_inference_bayesian_heading}
         if name in model_classes:
             return model_classes[name]
         else:
             raise ValueError(f"Model name {name} not recognized!")
 
+    # Method to load the model from the checkpoint
     def load_model(self, model_path):
         try:
             self.model.load_state_dict(torch.load(model_path))
@@ -49,21 +112,9 @@ class ModelInference:
             return self.model
         except Exception as e:
             raise ValueError(f"Failed to load the model: {e}")
-    
-    
-    # def postprocess_data(self, output):
-    #     # Convert tensor to NumPy array
-    #     sin_angles, cos_angles = y_pred_angles[..., 0], y_pred_angles[..., 1]
-    #     pred_angles = torch.arctan2(sin_angles, cos_angles)
-    #     ex_pred_mean, ex_pred_std = outputs[3][0][-1, :], outputs[3][1][-1, :] # closing price selecting the last one
-    #     ex_inp, ex_tgt, ex_pred_mean, ex_pred_std = self.extract_numpy(ex_inp, ex_tgt, ex_pred_mean, ex_pred_std)
-    #     ex_pred_low = ex_pred_mean - ex_pred_std
-    #     ex_pred_high = ex_pred_mean + ex_pred_std
-    #     ex_inp, ex_tgt, ex_pred_low, ex_pred_high, ex_pred_mean = self.inverse_scale(ex_inp, ex_tgt, ex_pred_low, ex_pred_high, ex_pred_mean, column_idx=self.column_idx)
-    #     return output_array
-    
+
+    # Method for post-processing model output
     def postprocess_data(self, model_output):
-        # Assume model_output is a tuple of tensors
         y_pred_segments, y_pred_angles, y_pred_profit, y_pred_prices = model_output
         sin_angles, cos_angles = y_pred_angles[..., 0], y_pred_angles[..., 1]
         y_pred_angles = torch.arctan2(sin_angles, cos_angles)
@@ -72,129 +123,97 @@ class ModelInference:
         y_pred_segments = y_pred_segments.cpu().detach().numpy()
         y_pred_angles = y_pred_angles.cpu().detach().numpy()
         y_pred_profit = y_pred_profit.cpu().detach().numpy()
-        # y_pred_prices = y_pred_prices.cpu().detach().numpy()  # Assume this contains mean, low, and high prices
 
-        # For simplicity, let's assume y_pred_prices has shape (3, N)
+        # Process prices
         mean, std = y_pred_prices
-
         y_pred_low = mean-std 
         y_pred_high = mean+std 
         y_pred_mean = mean.cpu().detach().numpy()
         y_pred_low = y_pred_low.cpu().detach().numpy()
         y_pred_high = y_pred_high.cpu().detach().numpy()
-        
 
+        # Load scalers for inverse scaling
         dir = os.path.join(os.path.split(self.checkpoint_path)[0], "..")
         input_scaler_list = joblib.load(os.path.join(dir, 'input_scaler_list.pkl'))
-        input_scaler = joblib.load(os.path.join(dir, 'input_scaler.pkl'))
-        # inverse scale
         y_pred_mean, y_pred_low, y_pred_high = self.inverse_scale(y_pred_mean, y_pred_low, y_pred_high, scaler_list=input_scaler_list)
-        # Now you have the data in a usable format, you can return it as needed
+        
         return y_pred_segments, y_pred_angles, y_pred_profit, y_pred_mean, y_pred_low, y_pred_high
 
+    # Method to preprocess dataset
+    # without fetching data from yfinance
     def preprocess_dataset(self, data, ticker):
         if not len(data):
             print(f"No data fetched for ticker: {ticker}")
             return None
-        data = seqTradeDataset.feature_engineering(data)
+        input_processor = InputPreprocessor()
+        processed_features = input_processor(data)
+        
+        data_features = seqTradeDataset.feature_engineering(data)
         dir = os.path.join(os.path.split(self.checkpoint_path)[0], "..")
+        total_features = np.concatenate([np.array(data_features), processed_features], axis=-1)
+        data = pd.DataFrame(data=total_features, index=data.index)
         scaled_data, scaler, date = seqTradeDataset.preprocess_data(data, load_scaler=dir)
         self.input_scaler = scaler
         return scaled_data, scaler, date
-    
-    def prune_for_horizon(self, data, window_size, horizon):
-        # Ensure the data is sorted by datetime index in ascending order
-        # attach index to the df
+
+    # Method to prune data for a specific horizon
+    def prune_for_horizon(self, data, window_size, horizon, train=False):
         data = data.sort_index(ascending=True)
-        # import pdb; pdb.set_trace()s
-        # Calculate the starting index for pruning
-        start_idx = len(data) - window_size - horizon -400
-        
-        # Ensure the start index is not negative
+        if train:
+            start_idx = len(data) - window_size - horizon 
+        else:
+            start_idx = len(data) - window_size
         start_idx = max(0, start_idx)
-        
-        # Prune the data
         pruned_data = data.iloc[start_idx:start_idx + window_size]
-        
         return pruned_data, start_idx
-    # def check_model_compatability():
-    #     # if length of the data in rows and timetstamp is not compatible with the model window, future timesteps then fit it otherwise skipZ
-    #     # write checks for criteria 
-        
-    def preprocess_data(self, data, ticker):
-        # check if the window is suffcient i.e model window input is 
-        horizon = 15
-        window_size = 30
-        
+
+    # Method to preprocess data
+    def preprocess_data(self, data, ticker, train=False):
+        horizon = Config.HORIZON
+        window_size = Config.WINDOW_SIZE
         data_features, scaler, date = self.preprocess_dataset(data, ticker)
-        data_to_prune = pd.DataFrame(data=data_features, index=data.index) # add the index of date time to sort
-        data_features, start_idx=self.prune_for_horizon(data_to_prune, window_size, horizon)
-        data_features= data_features.to_numpy() # removes the index of datetimeand and makes numpy
-        # max_profit, segments = Solver.gen_transactions(Solver(), data_features[3], k=20)
-        # # Check if seg represents a single segment or multiple segments
-        # segments = seqTradeDataset.ensure_dimension(segments)
-        # segments.sort(key=lambda i:i[0])
-
-        # scaled_segments = self.segment_scale.scale(segments)
-        input_tensor = torch.tensor(data_features, dtype = torch.float32)
-        segments_tensor = torch.tensor(data_features, dtype = torch.float32)
-        # check if the input tensor has batch size 1
-
+        data_to_prune = pd.DataFrame(data=data_features, index=data.index)
+        data_features, start_idx = self.prune_for_horizon(data_to_prune, window_size, horizon, train)
+        data_features = data_features.to_numpy()
+        input_tensor = torch.tensor(data_features, dtype=torch.float32)
+        segments_tensor = torch.tensor(data_features, dtype=torch.float32)
         return input_tensor, segments_tensor, start_idx
-    
-    # def run_inference_bayesian_heading(self, data ,ticker, only_futures = True ):
-    #     preprocessed_data = self.preprocess_data(data, ticker)
-    #     with torch.no_grad():
-    #         model_output = self.model(preprocessed_data) # prices have mean and std vectors in the tensor
 
-    #     y_pred_segments, y_pred_angles,  y_pred_profit,  y_pred_prices_low, y_pred_prices_high, y_pred_prices_mean  = self.postprocess_data(model_output)
-    #     outputs = [y_pred_segments, y_pred_angles,  y_pred_profit,  y_pred_prices_low, y_pred_prices_high, y_pred_prices_mean ]
-    #     # next plot the pred prices
-    #     return outputs 
-    
+    # Method to run Bayesian heading inference
     def run_inference_bayesian_heading(self, data, ticker, only_futures=True):
         preprocessed_data, segments_tensor, start_idx = self.preprocess_data(data, ticker)
-        # add the batch dimension 
-
         preprocessed_data = preprocessed_data[:, None, ...].cuda()
         with torch.no_grad():
-            model_output = self.model(preprocessed_data)  # Assume model takes two inputs, adjust as necessary
+            model_output = self.model(preprocessed_data)
 
         outputs = self.postprocess_data(model_output)
-
         return outputs, start_idx
-    
+
+    # Static method for inverse scaling
     @staticmethod
     def inverse_scale(*args, column_idx=3, scaler_list=None):
         out = []
-        dataset = seqTradeDataset([], just_init=True) # mock dataset
-
+        dataset = seqTradeDataset([], just_init=True)
         for arg in args:
-            out.append( dataset.inverse_transform_predictions(arg, column_idx=column_idx, scaler_list=scaler_list)  )
+            out.append(dataset.inverse_transform_predictions(arg, column_idx=column_idx, scaler_list=scaler_list))
         return out
-    
-def setup_ml():
-    # Load the trained model
-    model_name = 'SegmentBayesianModel'  # Replace with the name of the model you want to use
-    input_dim, hidden_dim, num_layers, num_segments, device = 10, 128, 2, 20, 'cpu'  # Replace with your actual parameters
-    model = make_model(model_name, input_dim, hidden_dim, num_layers, num_segments, device)
-    model.load_state_dict(torch.load('path/to/your/saved/model.pth'))
-    model.eval()
 
-
+# DataManager class to manage stock data
 class DataManager:
-    def __init__(self, ticker, period='1d', interval='1m'):
+    def __init__(self, ticker=Config.DEFAULT_TICKER, period=Config.DEFAULT_PERIOD, interval=Config.DEFAULT_INTERVAL):
         self.ticker = ticker
         self.period = period
         self.interval = interval
-        self.conn = sqlite3.connect('stock_data.db')  # Connect to the database
+        self.conn = sqlite3.connect(Config.SQLITE_DB_PATH)
         self.c = self.conn.cursor()
         self.create_table()
         self.data = self.get_price_data()
 
+    # Destructor to close database connection
     def __del__(self):
-        self.conn.close()  # Close the database connection when DataManager is destroyed
+        self.conn.close()
 
+    # Method to create database table
     def create_table(self):
         self.c.execute('''CREATE TABLE IF NOT EXISTS stock_data (
                           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,24 +226,35 @@ class DataManager:
                           volume INTEGER)''')
         self.conn.commit()
 
-    
+    # Method to generate a random color
     def random_color(self):
         return f'rgb({random.randint(0, 255)}, {random.randint(0, 255)}, {random.randint(0, 255)})'
 
-
-    @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
-    def get_price_data_from_api(self): #ticker period interval
+    # Cached method to get price data from API
+    @st.cache(hash_funcs=Config.STREAMLIT_CACHE_HASH_FUNCS)
+    def get_price_data_from_api(self):
         try:
             data = yf.Ticker(self.ticker).history(period=self.period, interval=self.interval)
             return data
         except Exception as e:
             print(f"An error occurred: {e}")
             return None
+        
+    # @memory.cache
+    # def get_price_data_from_api(self):
+    #     try:
+    #         data = yf.Ticker(self.ticker).history(period=self.period, interval=self.interval)
+    #         return data
+    #     except Exception as e:
+    #         print(f"An error occurred: {e}")
+    #         return None
 
+    # Method to validate data
     def validate_data(self, data):
         required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
         return all(col in data.columns for col in required_cols)
 
+    # Method to save data to database
     def save_to_db(self, data):
         for index, row in data.iterrows():
             self.c.execute('''INSERT INTO stock_data (ticker, timestamp, open, high, low, close, volume)
@@ -232,58 +262,52 @@ class DataManager:
                            (self.ticker, index, row['Open'], row['High'], row['Low'], row['Close'], row['Volume']))
         self.conn.commit()
 
-    # def resample_data(self, data):
-    #     # Resample to a regular interval, say 1 minute
-    #     data_resampled = data.resample('1T').ohlc()  # '1T' denotes 1-minute intervals
-    #     # Forward-fill missing values
-    #     data_ffilled = data_resampled.ffill()
-    #     return data_ffilled
-
+    # Method to filter trading hours
     def filter_trading_hours(self, data):
-        # Convert the index to the local timezone (EST)
         try:    
             data.index = data.index.tz_convert('America/New_York')
         except Exception as e:
             print(e)
             print("moving on")
-        # Filter the data for the trading hours
-        # data = data.between_time('09:30', '16:00')
         return data
-    
+
+    # Cached method to get price data
     @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_price_data(self):
-        # Check if data already exists in the database
         self.c.execute('''SELECT * FROM stock_data WHERE ticker = ?''', (self.ticker,))
         data = self.c.fetchall()
         if data:
-            # Load data from database if it exists
             columns = ['id', 'ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
             df = pd.DataFrame(data, columns=columns).set_index('timestamp')
+            return df.drop
+
+            # Continue the get_price_data method
             return df.drop(columns=['id', 'ticker'])
         else:
             # Fetch data from yfinance if not in database
             data = self.get_price_data_from_api()
             if data is not None and self.validate_data(data):
-                # data = self.resample_data(data)
-                # Save new data to database
                 data = self.filter_trading_hours(data)
-                # self.save_to_db(data)
+                self.save_to_db(data)
                 return data
             else:
                 print("Failed to retrieve or validate data.")
                 return None
-    
+
+    # Cached method to update data
     @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def update_data(self):
         new_data = self.get_price_data_from_api()
         if new_data is not None and self.validate_data(new_data):
-            # self.save_to_db(new_data)
+            self.save_to_db(new_data)
             self.data = new_data
 
+    # Cached method to calculate moving average
     @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_moving_average(self, window):
         return self.data['Close'].rolling(window=window).mean()
-    
+
+    # Cached method to calculate RSI
     @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_RSI(self, window):
         delta = self.data['Close'].diff(1)
@@ -291,51 +315,55 @@ class DataManager:
         loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
         rs = gain / loss
         return 100 - (100 / (1 + rs))
-    
+
+    # Cached method to calculate MACD
     @st.cache(hash_funcs={sqlite3.Connection: hash_sqlite3_connection, sqlite3.Cursor: hash_sqlite3_connection})
     def get_MACD(self):
-        exp12 = self.data['Close'].ewm(span=12, adjust=False).mean()
-        exp26 = self.data['Close'].ewm(span=26, adjust=False).mean()
+        exp12 = self.data['Close'].ewm(span=Config.MACD_FAST_PERIOD, adjust=False).mean()
+        exp26 = self.data['Close'].ewm(span=Config.MACD_SLOW_PERIOD, adjust=False).mean()
         macd = exp12 - exp26
-        signal = macd.ewm(span=9, adjust=False).mean()
+        signal = macd.ewm(span=Config.MACD_SIGNAL_PERIOD, adjust=False).mean()
         return macd, signal
-    
+
+    # Method to predict future prices using linear regression
     def predict_prices(self):
         model = LinearRegression()
         X = np.array(range(len(self.data))).reshape(-1, 1)
         y = self.data['Close'].values
         model.fit(X, y)
-        future_X = np.array(range(len(self.data), len(self.data) + 5)).reshape(-1, 1)
+        future_X = np.array(range(len(self.data), len(self.data) + Config.PRICE_PREDICTION_FUTURE_DAYS)).reshape(-1, 1)
         return model.predict(future_X)
-    
+
+    # Method to plot price data
     def plot_price_data(self):
         fig = go.Figure(data=[go.Candlestick(x=self.data.index,
-                open=self.data['Open'],
-                high=self.data['High'],
-                low=self.data['Low'],
-                close=self.data['Close'])])
+                                             open=self.data['Open'],
+                                             high=self.data['High'],
+                                             low=self.data['Low'],
+                                             close=self.data['Close'])])
         fig.update_layout(
             title='Price Data',
             xaxis_title='Date',
             yaxis_title='Price',
-            template='plotly_dark',
-            margin=dict(l=10, r=10, t=30, b=10)
+            template=Config.PLOTLY_TEMPLATE, 
+            margin=Config.PLOT_MARGIN
         )
         fig.update_xaxes(rangeslider_visible=True)
         return fig
 
+    # Method to plot moving average
     def plot_moving_average(self, window):
-        ma = self.data['Close'].rolling(window=window).mean()
+        ma = self.get_moving_average(window)
         fig = go.Figure(data=[go.Scatter(x=self.data.index, y=ma, mode='lines', name='MA')])
         fig.update_layout(
             title=f'Moving Average (Window: {window})',
             xaxis_title='Date',
             yaxis_title='Price',
-            template='plotly_dark',
-            margin=dict(l=10, r=10, t=30, b=10)
+            template=Config.PLOTLY_TEMPLATE, 
+            margin=Config.PLOT_MARGIN
         )
         return fig
-    
+
     def plot_macd(self, ticker, fig, row_idx):
         macd_data, signal_data = self.data.get_MACD()
         # fig.add_trace(go.Scatter(x=macd_data.index, y=macd_data, mode='lines', name=f'{ticker} MACD'), row=row_idx, col=2)
@@ -641,10 +669,14 @@ class DataManager:
                 row=row_idx,
                 col=2
             )
-
-        
-
         return fig
+
+# Function to setup machine learning environment
+def setup_ml(model_path, model_name='SegmentBayesianHeadingModel'):
+    input_dim, hidden_dim, num_layers, num_segments, device = 10, 128, 2, 20, 'cpu'
+    model = make_model(model_name, input_dim, hidden_dim, num_layers, num_segments, device)
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
 
 
 def prune_predictions(arr):
@@ -662,6 +694,8 @@ def prune_predictions(arr):
     pruned_indices = np.where(fractional_parts <= 0.5, rounded_down, rounded_up)
     
     return pruned_indices
-# Usage:
-dm = DataManager('AAPL')
-dm.update_data()  # Call this method to update data
+
+if __name__ == "__main__":
+    # Usage example
+    dm = DataManager('AAPL')
+    dm.update_data()  # Call this method to update data

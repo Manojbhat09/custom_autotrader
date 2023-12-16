@@ -95,6 +95,10 @@ class ModelInference:
         self.run_inference = self.get_inference_fn(model_name)
         self.segment_scaler = Scaling1d(min_data=0, max_data=15, min_range=0, max_range=1)
         self.input_scaler = None
+        self.dataset = seqTradeDataset([], just_init=True)
+        # self.dataset =     eth_dataset = seqTradeDataset(processed_data, 
+        #                     window_size=60, 
+        #                     horizon=15)
 
     # Method to get the inference function based on the model name
     def get_inference_fn(self, name):
@@ -148,11 +152,11 @@ class ModelInference:
         input_processor = InputPreprocessor()
         processed_features = input_processor(data)
         
-        data_features = seqTradeDataset.feature_engineering(data)
+        data_features = self.dataset.feature_engineering(data)
         dir = os.path.join(os.path.split(self.checkpoint_path)[0], "..")
         total_features = np.concatenate([np.array(data_features), processed_features], axis=-1)
         data = pd.DataFrame(data=total_features, index=data.index)
-        scaled_data, scaler, date = seqTradeDataset.preprocess_data(data, load_scaler=dir)
+        scaled_data, scaler, date = self.dataset.preprocess_data(data, load_scaler=dir)
         self.input_scaler = scaler
         return scaled_data, scaler, date
 
@@ -180,7 +184,12 @@ class ModelInference:
         return input_tensor, segments_tensor, start_idx
 
     # Method to run Bayesian heading inference
-    def run_inference_bayesian_heading(self, data, ticker, only_futures=True):
+    def run_inference_bayesian_heading(self, data_inp, ticker, only_futures=True):
+        # make copy for use
+        if type(data_inp) == np.array:
+            data = np.array(data_inp)
+        elif type(data_inp) == pd.DataFrame:
+            data = data_inp.copy()
         preprocessed_data, segments_tensor, start_idx = self.preprocess_data(data, ticker)
         preprocessed_data = preprocessed_data[:, None, ...].cuda()
         with torch.no_grad():

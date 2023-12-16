@@ -7,12 +7,30 @@ from datetime import datetime
 import random
 from robinhood_manager import RobinhoodManager
 import plotly.express as px
-from infer_toy import generate_predictions_rnn
-
+from infer_toy import generate_predictions_rnn, import_latest_experiment_config, convert_to_dataframe
+from data_manager import ModelInference
+import os
 st.set_page_config(layout="wide")
 # Streamlit layout
 st.title('Streamlit Trading Dashboard')
-robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
+
+def setup_model():
+    run_directory = '../run/'
+    Config, exp_folder = import_latest_experiment_config(run_directory)
+    Config.WINDOW_SIZE = 60
+
+    # getting the checkpoints
+    Config.CHECKPOINT_FOLDER = os.path.join(exp_folder, "models")
+    checkpoints = [d for d in os.listdir(Config.CHECKPOINT_FOLDER)]
+    Config.CHECKPOINT_PATH = os.path.join(Config.CHECKPOINT_FOLDER, checkpoints[0])
+
+    ticker = Config.TICKER.split("-")[0]
+    num_data_points = Config.WINDOW_SIZE +5   # Number of points to fetch for initial data
+    last_timestamp = pd.Timestamp('2023-01-01 00:00:00')  # Example last timestamp
+
+    model_inference = ModelInference(Config.MODEL_NAME, Config.CHECKPOINT_PATH, config=Config)
+    print("checkpoint loaded succesfully")
+    return model_inference
 
 def get_seconds_from_interval(interval):
     interval_mapping = {
@@ -71,13 +89,23 @@ def generate_predictions(data, last_timestamp, num_predictions=5):
     return predict_data_point
 
 def get_real_time_rh_data():
-    real_time_data = robinhood_manager.get_current_crypto_price(st.session_state.selected_ticker)
+    real_time_data = st.session_state.robinhood_manager.get_current_crypto_price(st.session_state.selected_ticker)
     new_data_point = {
         'Timestamp': pd.Timestamp.now(),
         'Value': real_time_data
     }
     print("rh data: ", new_data_point)
     return new_data_point
+
+def get_real_time_crypto_data(ticker):
+    real_time_data = st.session_state.robinhood_manager.get_real_time_crypto_data(ticker)
+    new_data_point = {
+        'Timestamp': pd.Timestamp.now(),
+        'Value': real_time_data["Close"]
+    }
+    print("rh data: ", new_data_point)
+
+    return new_data_point, real_time_data 
 
 def get_dummpy_data():
     new_data_point = {
@@ -86,21 +114,127 @@ def get_dummpy_data():
     }
     return new_data_point
 
-# Define a function to update the data, predictions, and past predictions
-def update_data_and_predictions():
+def interval_to_pandas_resampling_rule(desired_interval):
+    # Mapping of intervals to pandas resampling rule format
+    rule_mapping = {
+        '1sec': '1S',
+        '3sec': '3S',
+        '5sec': '5S',
+        '15sec': '15S',
+        '30sec': '30S',
+        '1min': '1T',
+        '5min': '5T',
+        '10min': '10T',
+        '15min': '15T',
+        '30min': '30T',
+        '1hr': '1H', 
+        '1d': '1D',
+        '1w': '1W',
+        '1mo': '1M'  # Note: '1M' stands for calendar month end frequency
+    }
+    return rule_mapping.get(desired_interval, '1T')  # Default to 1 minute if interval not found
 
-    new_data_point = get_real_time_rh_data()
+
+def calculate_interval_span(desired_interval, points_required):
+    # Map the desired interval to robin_stocks interval and calculate the span
+    interval_mapping = {
+        '1sec': ('15second', 'hour'),
+        '3sec': ('15second', 'hour'),
+        '5sec': ('15second', 'hour'),
+        '15sec': ('15second', 'hour'),
+        '30sec': ('15second', 'hour'),
+        '1min': ('15second', 'hour'),
+        '5min': ('5minute', 'day'),
+        '10min': ('5minute', 'day'),
+        '15min': ('5minute', 'day'),
+        '30min': ('10minute', 'week'),
+        '1hr': ('hour', 'week'), 
+        '1d': ('day', 'year'),
+        '1w': ('day', '5year'),
+        '1mo': ('week', '5year')
+    }
+
+    robin_stocks_interval, robin_stocks_span = interval_mapping.get(desired_interval, ('5minute', 'day'))
+
+    return robin_stocks_interval, robin_stocks_span
+
+def fetch_and_resample_crypto_data( symbol, desired_interval, points_required):
+    interval, span = calculate_interval_span(desired_interval, points_required)
+    historical_data = st.session_state.robinhood_manager.get_crypto_historicals(symbol, interval=interval, span=span)
+
+    # Convert to DataFrame and resample
+    df = pd.DataFrame(historical_data)
+    df['begins_at'] = pd.to_datetime(df['begins_at'])
+    df.set_index('begins_at', inplace=True)
+
+    resampling_rule = interval_to_pandas_resampling_rule(desired_interval)
+    resampled_df = df.resample(resampling_rule).agg({
+        'open_price': 'first',
+        'close_price': 'last',
+        'high_price': 'max',
+        'low_price': 'min',
+        'volume': 'sum'
+    })
+    # Fill None/NaN values
+    resampled_df.interpolate(method='polynomial', order=2, inplace=True)
+    import pdb; pdb.set_trace()
+    return resampled_df.iloc[:points_required]
+
+
+# Define a function to update the data, predictions, and past predictions
+def update_data_and_predictions(load_data = False, debug=False):
+    # new_data_point = get_real_time_rh_data()
+    new_data_point, real_time_data = get_real_time_crypto_data(st.session_state.selected_ticker)
     # new_data_point = get_dummpy_data()
 
     st.session_state.data = st.session_state.data.append(new_data_point, ignore_index=True)
+    st.session_state.realtime_data = st.session_state.realtime_data.append(real_time_data, ignore_index=True)
     
     # Archive the current predictions as past predictions
-    st.session_state.past_predictions = st.session_state.past_predictions.append(
-        st.session_state.predictions.iloc[0], ignore_index=True
-    )
-    
+    if len(st.session_state.predictions):
+        st.session_state.past_predictions = st.session_state.past_predictions.append(
+            st.session_state.predictions.iloc[0], ignore_index=True
+        )
+
+    if load_data:
+
+        if debug:
+            import pickle
+            st.session_state.data = pickle.load(open("realtimedata", "rb"))
+            st.session_state.predictions = pickle.load(open("predictions2", "rb"))
+            st.session_state.realtime_data = pickle.load(open("realtimedata2", "rb"))
+            st.session_state.past_predictions = pickle.load(open("predictions", "rb"))
+        
+        else:
+
+            import pdb; pdb.set_trace()
+            crypto_df = fetch_and_resample_crypto_data(symbol=st.session_state.selected_ticker, desired_interval=st.session_state.plot_update_interval, points_required=61)
+            crypto_data = st.session_state.robinhood_manager.rename_pd(crypto_df)
+            st.session_state.realtime_data = crypto_data
+            st.session_state.data = crypto_data.rename(columns={"CLose":"Value"})[["Timestamp", "Value"]]
+            # Generate and update predictions for 60 items
+            for _ in range(60):
+                # Assuming st.session_state['data'] is already defined and contains the necessary data
+                last_timestamp = st.session_state['data']['Timestamp'].iloc[-1]
+                new_predictions = generate_predictions(st.session_state['data'].iloc[-1], last_timestamp)
+                
+                # Update past predictions and current predictions
+                if len(st.session_state.predictions):
+                    st.session_state.past_predictions = st.session_state.past_predictions.append(
+                        st.session_state.predictions.iloc[0], ignore_index=True
+                    )
+                st.session_state.predictions = new_predictions
+
+
     # Generate new predictions
-    new_predictions = generate_predictions_rnn(new_data_point, st.session_state.data.iloc[-1]['Timestamp'])
+    if len(st.session_state.data) < 61:
+        new_predictions = generate_predictions(st.session_state['data'].iloc[-1], pd.Timestamp.now())
+    else:
+        print("running new inference")
+        data = convert_to_dataframe(st.session_state.realtime_data) 
+        new_predictions = generate_predictions_rnn( st.session_state.inference_model , data, st.session_state.data.iloc[-1]['Timestamp'])
+        new_predictions = np.array(new_predictions)
+        new_predictions = pd.DataFrame({'Timestamp': new_predictions[:, 0], 'Prediction': new_predictions[:, 1]})
     st.session_state.predictions = new_predictions
 
 def gen_plot_figs():
@@ -162,8 +296,8 @@ if 'logs' not in st.session_state:
     st.session_state['logs'] = "Application started.\n"
     # Placeholder for logs
     
-# if 'robinhood_manager' not in st.session_state:
-#     robinhood_manager = st.session_state['robinhood_manager']
+if 'robinhood_manager' not in st.session_state:
+    st.session_state['robinhood_manager'] = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
 # Initialize session state for news articles
 if 'news_articles' not in st.session_state:
     st.session_state['news_articles'] = generate_news_articles()
@@ -193,6 +327,12 @@ if 'transactions' not in st.session_state:
 
 if 'past_predictions' not in st.session_state:
     st.session_state['past_predictions'] = pd.DataFrame(columns=['Timestamp', 'Prediction'])
+if 'data' not in st.session_state:
+    st.session_state['data'] = pd.DataFrame(columns=["Timestamp", "Value"])
+if 'realtime_data' not in st.session_state:
+    st.session_state['realtime_data'] = pd.DataFrame(columns=["Timestamp", "Open", "High", "Low", "Close", "Volume"])
+if 'inference_model' not in st.session_state:
+    st.session_state['inference_model'] = setup_model()
 
 # Initialize the data, predictions, and past predictions in the session state
 if 'data' not in st.session_state:
@@ -203,10 +343,11 @@ if 'data' not in st.session_state:
     })
 
 if 'predictions' not in st.session_state: # dummy predictions
-    st.session_state['predictions'] = generate_predictions(st.session_state['data'], pd.Timestamp.now())
+    st.session_state['predictions'] = pd.DataFrame(columns=["Timestamp", "Prediction"])
+    # st.session_state['predictions'] = generate_predictions(st.session_state['data'], pd.Timestamp.now())
 
 # Update the data and predictions for the plot
-update_data_and_predictions()
+update_data_and_predictions(True)
 
 # Sidebar for input controls
 with st.sidebar:

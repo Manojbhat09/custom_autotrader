@@ -231,16 +231,7 @@ class RobinhoodManager():
         """
         try:
             crypto_quote = self.rh.get_crypto_quote(ticker)
-
-            current_data_point = {
-                'Timestamp': pd.Timestamp(crypto_quote['updated_at']),
-                'Open': float(crypto_quote['open_price']),
-                'High': float(crypto_quote['high_price']),
-                'Low': float(crypto_quote['low_price']),
-                'Close': float(crypto_quote['mark_price']),  # assuming mark price as close
-                'Volume': float(crypto_quote['volume']),
-            }
-
+            current_data_point = self.rename_pd(crypto_quote)
             if debug:
                 print("[UPDATE] Current crypto data: ")
                 print(current_data_point)
@@ -347,6 +338,24 @@ class RobinhoodManager():
 
         # Output the optimized weights
         return result.x
+    
+    def rename_pd(self, df):
+        df = pd.DataFrame(df)
+        column_names = list(df.columns)
+        if 'updated_at' in column_names:
+            Timestamp = pd.Timestamp(df['updated_at'])
+        elif 'begins_at' in column_names:
+            Timestamp = pd.Timestamp(df['begins_at'])
+         
+        current_data_point = {
+                'Timestamp': Timestamp,
+                'Open': float(df['open_price']),
+                'High': float(df['high_price']),
+                'Low': float(df['low_price']),
+                'Close': float(df['mark_price']),  # assuming mark price as close
+                'Volume': float(df['volume']),
+            }
+        return current_data_point
     
 if __name__ == "__main__":
     manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MENkeys796@09@')

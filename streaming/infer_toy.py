@@ -12,6 +12,7 @@ from data_manager import ModelInference
 from tqdm import tqdm
 import importlib
 import os
+import random
 
 Config=None 
 robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
@@ -38,46 +39,57 @@ def import_latest_experiment_config(run_directory, experiment_name=None):
 def fetch_real_time_crypto_data(ticker, num_points):
     data= []
     for _ in tqdm(range(num_points)):
-        data_point = robinhood_manager.get_real_time_crypto_data(ticker)
-        data.append(data_point)
+        data_point, real_time_data = robinhood_manager.get_real_time_crypto_data(ticker)
+        data.append(real_time_data)
     return data 
 
+# # Function to generate predictions
+# def generate_predictions(model_inference, data, last_timestamp, num_predictions=5):
+#     # Ensure there is enough data
+#     if len(data) < Config.WINDOW_SIZE:
+#         raise ValueError("Not enough data for the input window.")
+
+#     future_times = pd.date_range(start=last_timestamp, periods=Config.HORIZON, freq='T')
+#     predictions = []
+#     all_data_points = []
+
+#     # Generate predictions using ModelInference
+#     # We are generating x predictions for the same input and seeing the variance in the outputs
+
+#     for i in tqdm(range(num_predictions)):
+#         torch.manual_seed(42*i)
+#         random.seed(42*i)
+#         model_output, _ = model_inference.run_inference_bayesian_heading(data, ticker)
+#         mean_predictions = model_output[3]  # Assuming mean predictions are at index 3
+
+#         # Update predictions list
+#         predictions.extend(mean_predictions)
+#         # Update data for the next prediction
+#         # This part may need adjustment based on how your model expects the input data to be updated
+#         # data = update_data_with_predictions(data, mean_predictions)
+
+#         # Inverse transform predictions
+#         # inverse_predictions = model_inference.inverse_scale(np.array(mean_predictions), column_idx=3, scaler_list=seqTradeDataset.input_scaler_list)
+#         predict_data_point = pd.DataFrame({'Timestamp': future_times, 'Prediction': mean_predictions[:len(future_times)].squeeze() })
+#         all_data_points.append(predict_data_point)
+#     return all_data_points
+
 # Function to generate predictions
-def generate_predictions(model_inference, data, last_timestamp, num_predictions=5):
+def generate_predictions_rnn(model_inference, data, last_timestamp, ticker='BTC', window_size=60, horizon=15):
     # Ensure there is enough data
-    if len(data) < Config.WINDOW_SIZE:
+    if len(data) < window_size:
         raise ValueError("Not enough data for the input window.")
 
-    future_times = pd.date_range(start=last_timestamp, periods=Config.HORIZON, freq='T')
+    future_times = pd.date_range(start=last_timestamp, periods=horizon, freq='T')
     predictions = []
-    all_data_points = []
 
-    # Generate predictions using ModelInference
-    # We are generating x predictions for the same input and seeing the variance in the outputs
-    import pdb; pdb.set_trace()
-    input_tensor, segments_tensor, _ = model_inference.preprocess_data(data, ticker)
-    for _ in tqdm(range(num_predictions)):
-        import pdb; pdb.set_trace()
-        model_output, _ = model_inference.run_inference_bayesian_heading(input_tensor, ticker)
-        mean_predictions = model_output[3]  # Assuming mean predictions are at index 3
+    model_output, _ = model_inference.run_inference_bayesian_heading(data, ticker)
+    mean_predictions = model_output[3]  # Assuming mean predictions are at index 3
 
-        # Update predictions list
-        predictions.extend(mean_predictions)
-        import pdb; pdb.set_trace()
-        # Update data for the next prediction
-        # This part may need adjustment based on how your model expects the input data to be updated
-        # data = update_data_with_predictions(data, mean_predictions)
+    # Update predictions list
+    predictions.extend(mean_predictions)
 
-        # Inverse transform predictions
-        inverse_predictions = model_inference.inverse_scale(
-            np.array(predictions), column_idx=3, scaler_list=seqTradeDataset.input_scaler_list
-        )
-        
-        predict_data_point = pd.DataFrame({'Timestamp': future_times, 'Prediction': inverse_predictions[:len(future_times)]})
-    
-        print(predict_data_point)
-        all_data_points.append(predict_data_point)
-
+    predict_data_point = pd.DataFrame({'Timestamp': future_times, 'Prediction': mean_predictions[:len(future_times)].squeeze() })
     return predict_data_point
 
 def convert_to_dataframe(data):
@@ -123,9 +135,13 @@ if __name__ == "__main__":
     file.close()
 
     # data = fetch_real_time_crypto_data(ticker, num_data_points)
+    import pdb; pdb.set_trace()
     data = convert_to_dataframe(data_raw)
     # Initialize ModelInference with the model and checkpoint path
     model_inference = ModelInference(Config.MODEL_NAME, Config.CHECKPOINT_PATH, config=Config)
     # Generate predictions
-    output  = generate_predictions(model_inference, data, last_timestamp, num_predictions=num_predictions)# Assuming 'data' is your DataFrame with the last known data points
-    import pdb; pdb.set_trace()
+    output  = generate_predictions_rnn(model_inference, data, last_timestamp, num_predictions=num_predictions)# Assuming 'data' is your DataFrame with the last known data points
+    file = open("65_btc_predictions", "wb")
+    pickle.dump(output, file)
+    file.close()
+    

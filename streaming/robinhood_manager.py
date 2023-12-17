@@ -340,12 +340,18 @@ class RobinhoodManager():
         return result.x
     
     def rename_pd(self, df):
-        df = pd.DataFrame(df)
+        try: 
+            df = pd.DataFrame(df)
+        except Exception as e:
+            print(e)
+            print("creating index")
+            df = pd.DataFrame(df, index=[0])
+        import pdb; pdb.set_trace()
         column_names = list(df.columns)
         if 'updated_at' in column_names:
-            Timestamp = pd.Timestamp(df['updated_at'])
+            Timestamp = df['updated_at'].apply(lambda x: pd.Timestamp(x))
         elif 'begins_at' in column_names:
-            Timestamp = pd.Timestamp(df['begins_at'])
+            Timestamp = df['begins_at'].apply(lambda x: pd.Timestamp(x))
          
         current_data_point = {
                 'Timestamp': Timestamp,

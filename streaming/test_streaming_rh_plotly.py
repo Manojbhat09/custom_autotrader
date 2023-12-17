@@ -158,7 +158,14 @@ def calculate_interval_span(desired_interval, points_required):
 
     return robin_stocks_interval, robin_stocks_span
 
+
 def fetch_and_resample_crypto_data( symbol, desired_interval, points_required):
+    '''
+    If the interval is 15sec, then there is 15sec for the hour so 4 points every minute for 60 minutes, 240 points we have
+    But if its 3 sec interval then 15sec is interpolated into 3sec so 5*4*60 points for the hour, 1200 points so points are more 
+    Now to compare, we have to get more points in the 3sec one to satisfy the time range of 1 hour
+    
+    '''
     interval, span = calculate_interval_span(desired_interval, points_required)
     historical_data = st.session_state.robinhood_manager.get_crypto_historicals(symbol, interval=interval, span=span)
 
@@ -168,18 +175,14 @@ def fetch_and_resample_crypto_data( symbol, desired_interval, points_required):
     df.set_index('begins_at', inplace=True)
 
     resampling_rule = interval_to_pandas_resampling_rule(desired_interval)
-    resampled_df = df.resample(resampling_rule).agg({
-        'open_price': 'first',
-        'close_price': 'last',
-        'high_price': 'max',
-        'low_price': 'min',
-        'volume': 'sum'
-    })
-    # Fill None/NaN values
-    resampled_df.interpolate(method='polynomial', order=2, inplace=True)
-    import pdb; pdb.set_trace()
-    return resampled_df.iloc[:points_required]
+    resampled_df = df.resample(resampling_rule).agg({'open_price': 'first','close_price': 'last','high_price': 'max','low_price': 'min','volume': 'sum'})
 
+    # Convert None to NaN
+    resampled_df = resampled_df.applymap(lambda x: np.nan if x is None else x)
+
+    # Apply linear interpolation
+    resampled_df = resampled_df.astype(float).interpolate()
+    return resampled_df
 
 # Define a function to update the data, predictions, and past predictions
 def update_data_and_predictions(load_data = False, debug=False):
@@ -206,17 +209,15 @@ def update_data_and_predictions(load_data = False, debug=False):
             st.session_state.past_predictions = pickle.load(open("predictions", "rb"))
         
         else:
-
-            import pdb; pdb.set_trace()
+            # generate random prediction data to add that to the historic data from the api on just one call
             crypto_df = fetch_and_resample_crypto_data(symbol=st.session_state.selected_ticker, desired_interval=st.session_state.plot_update_interval, points_required=61)
             crypto_data = st.session_state.robinhood_manager.rename_pd(crypto_df)
             st.session_state.realtime_data = crypto_data
-            st.session_state.data = crypto_data.rename(columns={"CLose":"Value"})[["Timestamp", "Value"]]
+            st.session_state.data = crypto_data.rename(columns={"Close":"Value"})[["Timestamp", "Value"]]
             # Generate and update predictions for 60 items
-            for _ in range(60):
-                # Assuming st.session_state['data'] is already defined and contains the necessary data
-                last_timestamp = st.session_state['data']['Timestamp'].iloc[-1]
-                new_predictions = generate_predictions(st.session_state['data'].iloc[-1], last_timestamp)
+            for idx in range(60):
+                last_timestamp = st.session_state['data']['Timestamp'].iloc[idx]
+                new_predictions = generate_predictions(st.session_state['data'].iloc[idx], last_timestamp)
                 
                 # Update past predictions and current predictions
                 if len(st.session_state.predictions):

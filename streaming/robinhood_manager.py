@@ -2,6 +2,7 @@
 import robin_stocks.robinhood as rh
 import streamlit as st
 import logging 
+import pandas as pd
 
 class RobinhoodManager():
     def __init__(self, username, password):
@@ -36,6 +37,71 @@ class RobinhoodManager():
             logging.error(f"Error getting all unique symbols: {e}")
             print(e)
         return all_unique_symbols
+    
+    def get_portfolio_holdings(self):
+        holdings = self.rh.account.build_holdings()
+        portfolio_data = []
+        for ticker, details in holdings.items():
+            portfolio_data.append({
+                'Ticker': ticker,
+                'Equity': float(details['equity']),
+                'Percentage': float(details['percentage'])
+            })
+        return portfolio_data
+
+    def get_crypto_holdings(self):
+        crypto_positions = self.rh.crypto.get_crypto_positions()
+        crypto_data = []
+        for position in crypto_positions:
+            quantity = float(position['quantity'])
+            if quantity > 0:  # Only include if quantity is greater than zero
+                crypto_data.append({
+                    'Currency': position['currency']['code'],
+                    'Quantity': quantity
+                })
+        return crypto_data
+    
+    def get_option_holdings(self):
+        option_positions = self.rh.options.get_open_option_positions()
+        option_data = []
+        for position in option_positions:
+            # Assuming 'quantity' and 'average_price' are keys in the position dictionary
+            quantity = float(position['quantity'])
+            average_price = float(position['average_price'])
+            if quantity > 0:  # Only include if quantity is greater than zero
+                option_data.append({
+                    'Option': position['chain_symbol'],  # Replace 'chain_symbol' with actual key for option symbol
+                    'Value': quantity * average_price
+                })
+        return option_data
+    
+    def get_crypto_value_holdings(self):
+        crypto_positions = rh.crypto.get_crypto_positions()
+        crypto_data = []
+        for position in crypto_positions:
+            quantity = float(position['quantity'])
+            if quantity > 0:  # Only include if quantity is greater than zero
+                currency_code = position['currency']['code']
+                crypto_quote = self.get_current_crypto_price(currency_code)
+                current_price = float(crypto_quote['mark_price'])
+                total_value = quantity * current_price
+                crypto_data.append({
+                    'Currency': currency_code,
+                    'Quantity': quantity,
+                    'Value': total_value
+                })
+        return crypto_data
+    
+    def get_current_crypto_price(self, symbol):
+        try:
+            crypto_quote = self.rh.crypto.get_crypto_quote(symbol)
+            current_price = float(crypto_quote['mark_price'])
+            return current_price
+        except Exception as e:
+            logging.error(f"Error getting real-time crypto data for {symbol}: {e}")
+            print(e)
+            return None
+
     
     def get_portfolio_value(self):
         try:
@@ -158,6 +224,26 @@ class RobinhoodManager():
             print(e)
             return None
 
+    def get_real_time_crypto_data(self, ticker, debug=False):
+        """
+        Fetches the current crypto price along with other details like open, high, low, close prices, and volume
+        from the RobinhoodManager.
+        """
+        try:
+            crypto_quote = self.rh.get_crypto_quote(ticker)
+            current_data_point = self.rename_pd(crypto_quote)
+            if debug:
+                print("[UPDATE] Current crypto data: ")
+                print(current_data_point)
+            return current_data_point
+
+        except Exception as e:
+            print(f" not able to get data ")
+            print(e)
+        return None
+            
+    
+
     def calculate_sharpe_ratio(self, returns, risk_free_rate=0.02):
         excess_returns = returns - risk_free_rate
         return excess_returns.mean() / excess_returns.std()
@@ -252,6 +338,42 @@ class RobinhoodManager():
 
         # Output the optimized weights
         return result.x
+    
+    def rename_pd(self, df):
+        try: 
+            df = pd.DataFrame(df)
+        except Exception as e:
+            print(e)
+            print("creating index")
+            df = pd.DataFrame(df, index=[0])
+        column_names = list(df.columns)
+        if 'updated_at' in column_names:
+            Timestamp = df['updated_at'].apply(lambda x: pd.Timestamp(x))
+        elif 'begins_at' in column_names:
+            Timestamp = df['begins_at'].apply(lambda x: pd.Timestamp(x))
+        elif 'index' in column_names:
+            print("There is no timestamp column")
+            current_data_point = {
+                'Open': float(df['open_price']),
+                'High': float(df['high_price']),
+                'Low': float(df['low_price']),
+                'Close': float(df['mark_price']),  # assuming mark price as close
+                'Volume': float(df['volume']),
+            }
+            return current_data_point
+        else:
+            df = df.reset_index()
+            return self.rename_pd(df)
+        
+        current_data_point = {
+                'Timestamp': Timestamp,
+                'Open': df['open_price'].astype(float),
+                'High': df['high_price'].astype(float),
+                'Low': df['low_price'].astype(float),
+                'Close': df.get('mark_price', df.get('close_price', 0)).astype(float),  # assuming mark price as close
+                'Volume': df['volume'].astype(float),
+            }
+        return current_data_point
     
 if __name__ == "__main__":
     manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MENkeys796@09@')

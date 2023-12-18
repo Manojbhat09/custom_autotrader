@@ -162,7 +162,7 @@ class ModelInference:
 
     # Method to prune data for a specific horizon
     def prune_for_horizon(self, data, window_size, horizon, train=False):
-        data = data.sort_index(ascending=True)
+        data = data.sort_index(ascending=False)
         if train:
             start_idx = len(data) - window_size - horizon 
         else:

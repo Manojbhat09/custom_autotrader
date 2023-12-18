@@ -97,8 +97,16 @@ def convert_to_dataframe(data):
     df = pd.DataFrame(data)
 
     # Convert the 'Timestamp' column to a datetime index
-    df['Datetime'] = pd.to_datetime(df['Timestamp'], utc=True)
-    df = df.set_index('Datetime')
+    try:
+        df['Datetime'] = pd.to_datetime(df['Timestamp'], utc=True)
+        df = df.set_index('Datetime')
+    except Exception as e:
+        print(e)
+        print("simply adding a column without datetime conversion")
+        df_errored = pd.to_datetime(df['Timestamp'], utc=True, errors='coerce')
+        df_errless = df[df_errored.notna()]
+        df_errless['Datetime'] = pd.to_datetime(df_errless['Timestamp'], utc=True, errors='coerce')
+        df = df_errless.set_index('Datetime')
 
     # Drop the original 'Timestamp' column
     df = df.drop(columns=['Timestamp'])

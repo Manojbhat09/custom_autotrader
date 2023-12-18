@@ -346,20 +346,32 @@ class RobinhoodManager():
             print(e)
             print("creating index")
             df = pd.DataFrame(df, index=[0])
-        import pdb; pdb.set_trace()
         column_names = list(df.columns)
         if 'updated_at' in column_names:
             Timestamp = df['updated_at'].apply(lambda x: pd.Timestamp(x))
         elif 'begins_at' in column_names:
             Timestamp = df['begins_at'].apply(lambda x: pd.Timestamp(x))
-         
-        current_data_point = {
-                'Timestamp': Timestamp,
+        elif 'index' in column_names:
+            print("There is no timestamp column")
+            current_data_point = {
                 'Open': float(df['open_price']),
                 'High': float(df['high_price']),
                 'Low': float(df['low_price']),
                 'Close': float(df['mark_price']),  # assuming mark price as close
                 'Volume': float(df['volume']),
+            }
+            return current_data_point
+        else:
+            df = df.reset_index()
+            return self.rename_pd(df)
+        
+        current_data_point = {
+                'Timestamp': Timestamp,
+                'Open': df['open_price'].astype(float),
+                'High': df['high_price'].astype(float),
+                'Low': df['low_price'].astype(float),
+                'Close': df.get('mark_price', df.get('close_price', 0)).astype(float),  # assuming mark price as close
+                'Volume': df['volume'].astype(float),
             }
         return current_data_point
     

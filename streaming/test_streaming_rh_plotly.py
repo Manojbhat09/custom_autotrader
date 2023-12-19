@@ -16,18 +16,60 @@ from talib import RSI, BBANDS, STOCH
 st.set_page_config(layout="wide")
 # Streamlit layout
 st.title('Streamlit Trading Dashboard')
+INIT_BALANCE = 100000
 
+def calculate_maximum_drawdown(balance_history):
+    max_balance = 0
+    max_drawdown = 0
 
-def autotrade(current_data):
+    for balance in balance_history:
+        max_balance = max(max_balance, balance)
+        drawdown = max_balance - balance
+        max_drawdown = max(max_drawdown, drawdown)
+
+    return max_drawdown
+
+def calculate_profit(transactions):
+    buy_transactions = transactions[transactions['Action'] == 'buy']
+    sell_transactions = transactions[transactions['Action'] == 'sell']
+    total_profit = 0
+
+    for index, sell in sell_transactions.iterrows():
+        # Calculate average buy price before this sell transaction
+        relevant_buys = buy_transactions[buy_transactions['Timestamp'] < sell['Timestamp']]
+        if not relevant_buys.empty:
+            average_buy_price = relevant_buys['Price'].mean()
+            profit = (sell['Price'] - average_buy_price) * (st.session_state.positions / len(relevant_buys))
+            total_profit += profit
+
+    return total_profit
+
+def calculate_volatility(prices, window_size=20):
+    """ Calculate historical volatility over a specified window. """
+    returns = prices.pct_change()
+    volatility = returns.rolling(window=window_size).std()
+    return volatility.iloc[-1]
+
+def calculate_conservative_fraction(balance, profit, volatility, max_fraction=0.5, alpha=1):
     """
-    Make a trading decision based on the current market data.
+    Calculate a conservative fraction for trading transactions.
 
-    :param current_data: DataFrame with the latest market data
-    :return: (action, price) - The trading action ('buy', 'sell', or 'hold') and the price at which to execute
+    :param balance: Current trading balance
+    :param profit: Current profit
+    :param volatility: Current market volatility measure
+    :param max_fraction: Maximum fraction to be used for conservative trading
+    :param alpha: Volatility scaling factor
+    :return: Conservative fraction for trading
     """
+    if balance + profit == 0:
+        return 0  # Edge case to handle division by zero
+
+    conservative_fraction = 0.001+ (max_fraction * profit) / (balance + profit + alpha * volatility)
+    return min(conservative_fraction, max_fraction)  # Ensure it doesn't exceed max_fraction
+
+def autotrade_fractioned(current_data, balance, current_profit, positions):
     # Initialize the DataFrame to store the current data
     df = pd.DataFrame(current_data)
-
     # Calculate indicators
     df['upper_band'], df['middle_band'], df['lower_band'] = BBANDS(df['Close'], timeperiod=20)
     df['rsi'] = RSI(df['Close'], timeperiod=14)
@@ -37,19 +79,99 @@ def autotrade(current_data):
     last_row = df.iloc[-1]
 
     # Define trading signals
-    buy_signal = (last_row['rsi'] < 70) & (last_row['stochastic_k'] < 20)
+    buy_signal = (last_row['rsi'] < 80) & (last_row['stochastic_k'] < 100)
     sell_signal = (last_row['rsi'] > 30) | (last_row['stochastic_k'] > 60)
-
+ 
     # Decision-making
-    if buy_signal:
+    if balance < float(st.session_state.initial_balance):
+        if sell_signal and int(positions) > 0:
+            action = 'sell'
+            price = last_row['Close']
+        else:
+            action = 'hold'
+            price = None
+    else:
+        if buy_signal and balance >= last_row['Close']:
+            action = 'buy'
+            price = last_row['Close']
+        elif sell_signal and positions > 0:
+            action = 'sell'
+            price = last_row['Close']
+        else:
+            action = 'hold'
+            price = None
+            
+    print("stats: ", last_row['rsi'], last_row['stochastic_k'], action,balance, positions)
+    volatility = calculate_volatility(df['Close'])
+    transaction_fraction = calculate_conservative_fraction(balance,current_profit,  volatility)
+    return action, price, transaction_fraction
+
+def update_balance_positions_fraction(action, price, balance, positions, fraction=1.0):
+    """
+    Update balance and positions based on the action and fraction of transaction.
+
+    :param action: 'buy' or 'sell'
+    :param price: Price at which the action is taken
+    :param balance: Current balance
+    :param positions: Current positions
+    :param fraction: Fraction of the balance/position to be transacted
+    :return: Updated balance and positions
+    """
+    transaction_amount = price * fraction
+
+    if action == 'buy':
+        purchased_fraction = transaction_amount / price
+        positions += purchased_fraction
+        balance -= transaction_amount
+    elif action == 'sell':
+        sold_fraction = positions * fraction
+        positions -= sold_fraction
+        balance += sold_fraction * price
+
+    return balance, positions
+
+
+def update_balance_positions(action, price, balance, positions):
+    if action == 'buy':
+        positions += balance / price
+        balance = 0
+    elif action == 'sell':
+        balance += positions * price
+        positions = 0
+    return balance, positions
+
+def autotrade(current_data, balance, positions):
+    """
+    Make a trading decision based on the current market data.
+
+    :param current_data: DataFrame with the latest market data
+    :return: (action, price) - The trading action ('buy', 'sell', or 'hold') and the price at which to execute
+    """
+    # Initialize the DataFrame to store the current data
+    df = pd.DataFrame(current_data)
+    # Calculate indicators
+    df['upper_band'], df['middle_band'], df['lower_band'] = BBANDS(df['Close'], timeperiod=20)
+    df['rsi'] = RSI(df['Close'], timeperiod=14)
+    df['stochastic_k'], df['stochastic_d'] = STOCH(df['Close'], df['Close'], df['Close'], fastk_period=14, slowk_period=3, slowd_period=3)
+
+    # Get the latest data point
+    last_row = df.iloc[-1]
+
+    # Define trading signals
+    buy_signal = (last_row['rsi'] < 80) & (last_row['stochastic_k'] < 100)
+    sell_signal = (last_row['rsi'] > 30) | (last_row['stochastic_k'] > 60)
+ 
+    # Decision-making
+    if buy_signal and balance >= last_row['Close']:
         action = 'buy'
         price = last_row['Close']
-    elif sell_signal:
+    elif sell_signal and positions > 0:
         action = 'sell'
         price = last_row['Close']
     else:
         action = 'hold'
         price = None
+    print("stats: ", last_row['rsi'], last_row['stochastic_k'], action)
 
     return action, price
 
@@ -64,9 +186,9 @@ def update_time_display():
     global time_placeholder
     utc_time, current_timezone_time, pst_time, est_time = get_current_times()
     time_text = (
-        f"UTC Time: {utc_time.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
-        f"Local Timezone: {current_timezone_time.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
-        f"PST Time: {pst_time.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+        f"UTC Time: {utc_time.strftime('%Y-%m-%d %H:%M:%S %Z')}\t\t"
+        f"Local Timezone: {current_timezone_time.strftime('%Y-%m-%d %H:%M:%S %Z')}\t\t"
+        f"PST Time: {pst_time.strftime('%Y-%m-%d %H:%M:%S %Z')}\t\t"
         f"EST Time: {est_time.strftime('%Y-%m-%d %H:%M:%S %Z')}"
     )
     time_placeholder.text(time_text)
@@ -123,16 +245,16 @@ def generate_news_articles():
     articles = [{"headline": random.choice(headlines), "link": f"https://news.com/article_{random.randint(1, 100)}"} for _ in range(10)]
     return articles
 
-# Function to simulate autotrading (replace with your logic)
-def autotrade(data):
-    # Dummy logic for autotrading
-    if not data.empty and len(data) > 1:
-        last_value = data['Value'].iloc[-1]
-        if last_value > 0:  # Dummy condition for buying/selling
-            return 'buy', last_value
-        else:
-            return 'sell', last_value
-    return 'hold', 0
+# # Function to simulate autotrading (replace with your logic)
+# def autotrade(data):
+#     # Dummy logic for autotrading
+#     if not data.empty and len(data) > 1:
+#         last_value = data['Value'].iloc[-1]
+#         if last_value > 0:  # Dummy condition for buying/selling
+#             return 'buy', last_value
+#         else:
+#             return 'sell', last_value
+#     return 'hold', 0
 
 # Function to generate new predictions
 def generate_predictions(data, last_timestamp, num_predictions=5):
@@ -142,7 +264,6 @@ def generate_predictions(data, last_timestamp, num_predictions=5):
     predicted_values =np.random.normal(last_point, 20, size=num_predictions)
     # predicted_values =np.random.randint(2400, 2500, size=num_predictions)
     predict_data_point= pd.DataFrame({'Timestamp': future_times, 'Prediction': predicted_values})
-    print(predict_data_point)
     return predict_data_point
 
 def get_real_time_rh_data():
@@ -248,7 +369,7 @@ def ready_for_inference(data):
     return data
 
 # Define a function to update the data, predictions, and past predictions
-def update_data_and_predictions(load_data = True, debug=True):
+def update_data_and_predictions(load_data = True, debug=False):
     # new_data_point = get_real_time_rh_data()
     new_data_point, real_time_data = get_real_time_crypto_data(st.session_state.selected_ticker)
     # new_data_point = get_dummpy_data()
@@ -275,9 +396,9 @@ def update_data_and_predictions(load_data = True, debug=True):
             # generate random prediction data to add that to the historic data from the api on just one call
             crypto_df = fetch_and_resample_crypto_data(symbol=st.session_state.selected_ticker, desired_interval=st.session_state.plot_update_interval, points_required=61)
             crypto_data = st.session_state.robinhood_manager.rename_pd(crypto_df)
+            st.session_state.realtime_data = pd.DataFrame(crypto_data)
             crypto_data = pd.DataFrame(crypto_data)[["Timestamp", "Close"]]
             crypto_data.columns = ['Timestamp', "Value"]
-            st.session_state.realtime_data = crypto_data
             st.session_state.data = crypto_data
 
             # Generate and update predictions for 60 items
@@ -393,7 +514,8 @@ if 'logs' not in st.session_state:
     # Placeholder for logs
     
 if 'robinhood_manager' not in st.session_state:
-    st.session_state['robinhood_manager'] = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
+    username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+    st.session_state['robinhood_manager'] = RobinhoodManager(username,  password)
 # Initialize session state for news articles
 if 'news_articles' not in st.session_state:
     st.session_state['news_articles'] = generate_news_articles()
@@ -403,6 +525,8 @@ if 'min_transaction_profit' not in st.session_state:
     st.session_state['min_transaction_profit'] = 0
 if 'target_profit' not in st.session_state:
     st.session_state['target_profit'] = 0
+if 'initial_balance' not in st.session_state:
+    st.session_state['initial_balance'] = INIT_BALANCE
 if 'plot_update_interval' not in st.session_state:
     st.session_state['plot_update_interval'] = '5sec'
 if 'trading_interval' not in st.session_state:
@@ -429,6 +553,19 @@ if 'realtime_data' not in st.session_state:
     st.session_state['realtime_data'] = pd.DataFrame(columns=["Timestamp", "Open", "High", "Low", "Close", "Volume"])
 if 'inference_model' not in st.session_state:
     st.session_state['inference_model'] = setup_model()
+if 'balance' not in st.session_state:
+    st.session_state['balance'] = st.session_state['initial_balance']
+if 'positions' not in st.session_state:
+    st.session_state['positions'] = 0
+if 'profit' not in st.session_state:
+    st.session_state['profit'] = 0
+if 'roi' not in st.session_state:
+    st.session_state['roi'] = 0
+if 'max_drawdown' not in st.session_state:
+    st.session_state['max_drawdown'] = 0
+if 'balance_history' not in st.session_state:
+    st.session_state['balance_history'] = []
+
 
 # Initialize the data, predictions, and past predictions in the session state
 if 'data' not in st.session_state:
@@ -474,6 +611,10 @@ with st.sidebar:
     # Target profit input
     st.session_state.target_profit = st.text_input(
         'Target Profit:', st.session_state.target_profit)
+    
+    # Target profit input
+    st.session_state.initial_balance = st.text_input(
+        'Initial Balance:', st.session_state.initial_balance)
 
     # Button to toggle autotrade
     if st.button('Toggle Autotrade'):
@@ -522,16 +663,42 @@ if (current_time - st.session_state.last_news_update).seconds >= random.randint(
 with st.container():
     if st.session_state.autotrading:
         # Simulate a trade
-        action, price = autotrade(st.session_state.data)
+        # action, price = autotrade(st.session_state.realtime_data, st.session_state.balance, st.session_state.positions)
+        action, price, fraction = autotrade_fractioned(st.session_state.realtime_data, st.session_state.balance, st.session_state.profit, st.session_state.positions)
         if action != 'hold':
+            # st.session_state.balance, st.session_state.positions = update_balance_positions(action, price, st.session_state.balance, st.session_state.positions)
+            st.session_state.balance, st.session_state.positions = update_balance_positions_fraction(action, price, st.session_state.balance, st.session_state.positions, fraction)
+            price = price * fraction
             new_transaction = {'Timestamp': pd.Timestamp.now(), 'Action': action, 'Price': price}
             st.session_state.transactions = st.session_state.transactions.append(new_transaction, ignore_index=True)
+            st.session_state.balance_history.append(st.session_state.balance)
 
-    # Calculate and display profit
-    # Replace this with your actual profit calculation logic
-    profit = np.sum(st.session_state.transactions['Price'])  # Dummy profit calculation
-    st.subheader('Profit')
-    st.write(f'Total Profit: {profit}')
+            # Calculate and display profit
+            # Replace this with your actual profit calculation logic
+            profit = calculate_profit(st.session_state.transactions)
+            max_drawdown = calculate_maximum_drawdown(st.session_state.balance_history)
+            roi = float(profit) / float(st.session_state.initial_balance)
+            st.session_state.profit = profit
+            st.session_state.roi = roi
+            st.session_state.max_drawdown = max_drawdown
+    
+    # Display 'Current State' information side by side
+    cols = st.columns(5)  # Create 3 columns
+    # Display content in each column
+    cols[0].markdown('##### Total Profit')
+    cols[0].write(f'{st.session_state.profit}')
+
+    cols[1].markdown('##### Total ROI')
+    cols[1].write(f'{st.session_state.roi}')
+
+    cols[2].markdown('##### Max Drawdown')
+    cols[2].write(f'{st.session_state.max_drawdown}')
+
+    cols[3].markdown('##### Balance')
+    cols[3].write(f'{st.session_state.balance}')
+    
+    cols[4].markdown('##### Positions')
+    cols[4].write(f'{st.session_state.positions}')
 
     # Display transactions
     st.subheader('Transactions')

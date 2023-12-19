@@ -17,10 +17,11 @@ import numpy as np
 import random
 import time
 import sys
+import os 
 # from app import display_dashboard
 from auth_manager import AuthManager, verify_token
-
-robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
+username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+robinhood_manager = RobinhoodManager(username, password)
 auth = AuthManager()
 time_frame = st.sidebar.selectbox("Select Time Frame", ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'])
 interval = st.sidebar.selectbox("Select Interval", ['1m', '5m', '15m', '30m', '60m', '1d'])

@@ -16,6 +16,7 @@ import torch
 torch.manual_seed(42)  # Replace 42 with your desired seed value
 if torch.cuda.is_available():  # If you're using a GPU
     torch.cuda.manual_seed_all(42)
+import os
 
 USE_ML = True
 auth = AuthManager()
@@ -29,7 +30,8 @@ macd_selected = st.sidebar.checkbox('MACD')
 bollinger_bands_selected = st.sidebar.checkbox('Bollinger Bands')  # Added as an example
 fibonacci_retracements_selected = st.sidebar.checkbox('Fibonacci Retracements')  # Added as an example
 ichimoku_cloud_selected = st.sidebar.checkbox('Ichimoku Cloud')  # Added as an example
-robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
+username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+robinhood_manager = RobinhoodManager(username, password)
 
 config = {
     'scrollZoom': True, 

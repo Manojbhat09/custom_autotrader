@@ -9,7 +9,8 @@ WATCHLIST = "Tech"
 if __name__ == "__main__":
 
     # Set up Robinhood API authentication
-    rh.login(username='manojbhat09@gmail.com', password='MENkeys796@09@')
+    username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+    rh.login(username, password)
     watchlist = rh.get_watchlist_by_name(f'{WATCHLIST}')
     symbols = [i['symbol'] for i in watchlist['results']] 
     '''

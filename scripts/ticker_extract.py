@@ -27,8 +27,7 @@ def extract_stock_historicals(rh, ticker):
 
 if __name__ == "__main__":
     # Set up Robinhood API authentication
-    rh.login(username='manojbhat09@gmail.com', password='MENkeys796@09@')
+    username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+    rh.login(username, password)
 
     extract_stock_historicals(rh, STOCK_TICKER)
-
-#username='manojbhat09@gmail.com', password='MENkeys796@09@'

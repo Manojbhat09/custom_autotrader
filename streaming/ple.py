@@ -3,8 +3,10 @@ import pandas as pd
 import plotly.graph_objs as go
 from robinhood_manager import RobinhoodManager
 import numpy as np
+import os
 # Assuming you have a RobinhoodManager class
-robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
+username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+robinhood_manager = RobinhoodManager(username, password)
 
 def piecewise_linear_interpolation(df):
     new_df = pd.DataFrame(df, index=df.index)

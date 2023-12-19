@@ -88,8 +88,9 @@ if __name__ == "__main__":
 # import argparse
 # import datetime
 # import robin_stocks.robinhood as rh
-
-# rh.login(username='manojbhat09@gmail.com', password='MENkeys796@09@')
+# import os
+# username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+# rh.login(username, password)
 
 # # def
 # #  fetch_and_preprocess_data(ticker="ETH/USD", start_date="2022-01-01", end_date="2022-10-01", time_interval="30m"):

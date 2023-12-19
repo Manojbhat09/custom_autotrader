@@ -14,7 +14,8 @@
 #     all_data = pd.DataFrame()
 
 #     # Login to Robinhood (replace with your credentials)
-#     r.login(username='manojbhat09@gmail.com', password='MENkeys796@09@')
+#     username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+#     r.login(username, password)
     
 #     with tqdm(total=(end_date - start_date).days) as pbar:
 #         while current_end_date > start_date:

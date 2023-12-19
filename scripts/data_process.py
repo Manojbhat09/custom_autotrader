@@ -21,6 +21,8 @@ from sklearn.preprocessing import StandardScaler
 import pywt
 import numpy as np
 
+from sklearn.impute import SimpleImputer
+
 MAX_TRANSACTIONS = 10
 
 class Scaling1d:
@@ -234,7 +236,6 @@ class seqTradeDataset(Dataset):
             tickers = ticker_list
         else:
             ticker_list = [ticker]
-        import pdb; pdb.set_trace()
         if period:
             logger.debug(f"Fetching data for period: {period}")
             if len(ticker_list) == 1:
@@ -374,7 +375,8 @@ class seqTradeDataset(Dataset):
     
     @classmethod
     def preprocess_data(cls, data, drop_columns=False, run_dir=None, load_scaler=''):
-        data.dropna(inplace=True)
+        imputer = SimpleImputer(strategy='mean')  # or use 'median', 'most_frequent'
+        data = pd.DataFrame(imputer.fit_transform(data), columns=data.columns, index=data.index)
         data.interpolate(method='linear', axis=0, inplace=True, limit_direction='both')
         date = None
         if drop_columns:
@@ -436,7 +438,6 @@ class seqTradeDataset(Dataset):
             return None
         # save the data 
         joblib.dump(data, os.path.join(run_dir, 'raw_data.pkl')) 
-        
         # Input preprocessing
         input_processor = InputPreprocessor()
         processed_features = input_processor(data)

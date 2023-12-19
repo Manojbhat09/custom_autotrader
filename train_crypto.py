@@ -8,6 +8,8 @@ usage:
  python train_crypto.py --debug --train --expname height_angle_loss --model SegmentHeadingModel
  python train_crypto.py --eval --debug --expname incr_hidden_bayesian --model SegmentBayesianHeadingModel --checkpoint_path run/experiment_20231030_095433/models/ETH-USD_checkpoint_experiment_20231030_095433.pth
  python train_crypto.py --debug --train --expname="bayes_head_15m_60_15_64_geom_mse_profit_penalty_loss" --model SegmentBayesianHeadingModel
+ 
+ python train_crypto.py --train --debug --expname incr_hidden_bayesian --model SegmentBayesianHeadingModel
  '''
 from scripts.loss_fn import LossFunctions
 from scripts.models import MultiHeadModel, make_model
@@ -41,6 +43,75 @@ import torchvision
 import warnings 
 warnings.filterwarnings("ignore") 
 
+class Config:
+    # Model and Training Configurations
+    MODEL_NAME = "SegmentBayesianHeadingModel"  # Example: "SegmentHeadingModel"
+    INPUT_DIMS = 18
+    HIDDEN_DIM = 64
+    NUM_LAYERS = 5
+    NUM_SEGMENTS = 20
+    HORIZON = 15
+    WINDOW_SIZE = 60
+    BATCH_SIZE = 32
+    NUM_EPOCHS = 2000
+    LEARNING_RATE = 0.01
+    TIME_INTERVAL = "60m"
+    PERIOD = "1mo"
+    START_DATE = "2022-01-01"
+    END_DATE = "2022-10-01"
+    TICKER = "BTC-USD"
+
+    # Directory and File Configurations
+    RUN_DIR = 'run'
+    CHECKPOINT_FOLDER = 'models'
+    PLOT_FOLDER = 'plots'
+    LOG_DIR = 'logs'
+    TB_LOG_DIR = 'tb_logs'
+    TRAINING_PLOT_FOLDER = 'training_plots'
+    TESTING_PLOT_FOLDER = 'testing_plots'
+    RESULTS_FOLDER = 'results'
+    SCRIPTS_FOLDER = 'script_copies'
+
+    # Logging and Plotting
+    LOG_LEVEL_DEBUG = True
+    PLOT_SAVE_FORMAT = 'png'
+
+    # Evaluation Configurations
+    EVALUATION_FILENAME = 'evaluation_results.txt'
+    TEST_MSE_THRESHOLD = 0.01  # Example threshold for logging
+
+    # TensorBoard Settings
+    TB_LOG_HISTOGRAM_INTERVAL = 200  # Interval for logging histograms
+
+    # Loss Function Configurations
+    LOSS_FUNCTION = 'geometric_bayesian_weighted'  # Example: "mse"
+
+    DEVICE='cuda'
+
+    # Directory Structure
+    class Directories:
+        RUN_DIR = 'run'
+        CHECKPOINT_FOLDER = 'models'
+        PLOT_FOLDER = 'plots'
+        LOG_DIR = 'logs'
+        TB_LOG_DIR = 'tb_logs'
+        RESULTS_FOLDER = 'results'
+        SCRIPTS_FOLDER = 'script_copies'
+
+        @classmethod
+        def setup(cls, base_dir):
+            cls.CHECKPOINT_FOLDER = os.path.join(base_dir, cls.CHECKPOINT_FOLDER)
+            cls.PLOT_FOLDER = os.path.join(base_dir, cls.PLOT_FOLDER)
+            cls.LOG_DIR = os.path.join(base_dir, cls.LOG_DIR)
+            cls.TB_LOG_DIR = os.path.join(base_dir, cls.TB_LOG_DIR)
+            cls.RESULTS_FOLDER = os.path.join(base_dir, cls.RESULTS_FOLDER)
+            cls.SCRIPTS_FOLDER = os.path.join(cls.RESULTS_FOLDER, cls.SCRIPTS_FOLDER)
+            cls.TRAINING_PLOT_FOLDER = os.path.join(cls.PLOT_FOLDER, 'training')
+            cls.TESTING_PLOT_FOLDER = os.path.join(cls.PLOT_FOLDER, 'testing')
+            cls.TESTING_FOLDER = os.path.join(base_dir, 'testing')
+
+
+
 # Define the root directory for this run
 def generate_experiment_name():
     import datetime
@@ -50,40 +121,32 @@ def generate_experiment_name():
 current_datetime = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 current_datetime = generate_experiment_name()
 run_dir = f'run/{current_datetime}'
-
+Config.RUN_DIR= run_dir
+Config.Directories.RUN_DIR = run_dir
 # Define sub-directories
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CHECKPOINT_FOLDER = os.path.join(run_dir, 'models')
-PLOT_FOLDER = os.path.join(run_dir, 'plots')
-LOG_DIR = os.path.join(run_dir, 'logs')
-TB_LOG_DIR = os.path.join(run_dir, 'tb_logs')
-TRAINING_PLOT_FOLDER = os.path.join(PLOT_FOLDER, 'training')
-TESTING_PLOT_FOLDER = os.path.join(PLOT_FOLDER, 'testing')
-RESULTS_FOLDER = os.path.join(run_dir, 'results')
-SCRIPTS_FOLDER = os.path.join(run_dir, 'results', 'scripts')
+Config.Directories.setup(Config.Directories.RUN_DIR)
 
 def assign_variables(test):
     global ROOT, CHECKPOINT_FOLDER, PLOT_FOLDER, LOG_DIR, TB_LOG_DIR, TRAINING_PLOT_FOLDER, TESTING_PLOT_FOLDER, RESULTS_FOLDER, SCRIPTS_FOLDER, current_datetime, run_dir
 
     if not test:
         # Create sub-directories
-        os.makedirs(run_dir, exist_ok=True)
-        os.makedirs(CHECKPOINT_FOLDER, exist_ok=True)
-        os.makedirs(PLOT_FOLDER, exist_ok=True)
-        os.makedirs(LOG_DIR, exist_ok=True)
-        os.makedirs(TRAINING_PLOT_FOLDER, exist_ok=True)
-        os.makedirs(TESTING_PLOT_FOLDER, exist_ok=True)
-        os.makedirs(RESULTS_FOLDER, exist_ok=True)
-        os.makedirs(SCRIPTS_FOLDER, exist_ok=True)
+        for attribute in dir(Config.Directories):
+            if not attribute.startswith("__") and not callable(getattr(Config.Directories, attribute)):
+                directory = getattr(Config.Directories, attribute)
+                os.makedirs(directory, exist_ok=True)
 
 def copy_files(SCRIPTS_FOLDER):
     # Copy scripts to SCRIPT_FOLDER
     script_name = os.path.basename(__file__)
-    shutil.copy(script_name, f'{SCRIPTS_FOLDER}/{script_name}')
+    shutil.copy(script_name, os.path.join(Config.Directories.SCRIPTS_FOLDER, script_name))
     current_dir = os.path.dirname(os.path.abspath(__file__))
     shutil.copy(os.path.join(current_dir, "scripts", "loss_fn.py"), os.path.join(SCRIPTS_FOLDER, "loss_fn.py"))
     shutil.copy(os.path.join(current_dir, "scripts", "models.py"), os.path.join(SCRIPTS_FOLDER, "models.py"))
     shutil.copy(os.path.join(current_dir, "scripts", "data_process.py"), os.path.join(SCRIPTS_FOLDER, "data_process.py"))
+
+
 
 class TensorBoardLogger:
     def __init__(self, log_dir):
@@ -229,7 +292,7 @@ class Evaler:
             return mae, mse, rmse
 
 def setup_logging(log_dir, log_level=logging.DEBUG):
-    log_file_path = os.path.join(log_dir, 'run.log')
+    log_file_path = os.path.join(Config.Directories.LOG_DIR, 'run.log')
     logger = logging.getLogger('')
     logger.setLevel(log_level)
     
@@ -260,7 +323,7 @@ def plot_results(train_losses, test_losses):
     plt.ylabel('Loss')
     plt.title('Training and Test Loss Over Epochs')
     plt.legend()
-    plot_path = os.path.join(TRAINING_PLOT_FOLDER, 'loss_plot.png')
+    plot_path = os.path.join(Config.Directories.TRAINING_PLOT_FOLDER, 'loss_plot.png')
     plt.savefig(plot_path)
     plt.close()
 
@@ -270,7 +333,7 @@ def postprocess(action_tensor):
     return action_tensor
 
 def save_results(mae, mse, rmse, filename):
-    result_file_path = os.path.join(RESULTS_FOLDER, filename)
+    result_file_path = os.path.join(Config.Directories.RESULTS_FOLDER, filename)
     with open(result_file_path, 'w') as file:
         file.write(f"Mean Absolute Error (MAE): {mae:.4f}\n")
         file.write(f"Mean Squared Error (MSE): {mse:.4f}\n")
@@ -282,7 +345,6 @@ def save_results(mae, mse, rmse, filename):
 
 def fetch_and_preprocess_data(ticker="ETH-USD", start_date="2022-01-01", end_date="2022-10-01", time_interval="30m", period='2mo', run_dir=None):
     # Fetching the data
-    import pdb; pdb.set_trace()
     processed_data = seqTradeDataset.fetch_and_preprocess_data(
         ticker=ticker, 
         period=period, 
@@ -355,14 +417,15 @@ def plot_tensorboard_bayes_test(x_batch, y_prices, pred_prices, tb_logger, times
 
 def main(args):
     global PLOT_FOLDER, TESTING_PLOT_FOLDER, RESULTS_FOLDER
+    global run_dir
    
     log_level = logging.DEBUG if args.debug else logging.INFO  # Assuming you have a debug flag
     assign_variables(args.eval)
     
     if not args.eval:
-        setup_logging(LOG_DIR)
+        setup_logging(Config.LOG_DIR)
         added_experiment_name = args.expname+"_"+args.model
-        tb_log_dir= os.path.join(TB_LOG_DIR, current_datetime+"_"+added_experiment_name)
+        tb_log_dir= os.path.join(Config.TB_LOG_DIR, current_datetime+"_"+added_experiment_name)
         tb_logger = TensorBoardLogger(tb_log_dir)
 
     if 'head' in args.model.lower() or 'angle' in args.model.lower():
@@ -375,57 +438,63 @@ def main(args):
 
     # Assuming df is your dataframe with the features
     # Fetch and preprocess data
-    Ticker = "BTC-USD"
-    horizon = 15
-    window_size = 60
-    batch_size = 32
-    start_date = "2022-01-01" # ignored
-    end_date = "2022-10-01" # ignored
-    time_interval = "15m"
-    period = "1mo"  
-    num_segments = 20
-    hidden_dim = 64
-    num_layers = 5
-    input_dims = 18
+    Ticker = Config.TICKER
+    horizon = Config.HORIZON
+    window_size = Config.WINDOW_SIZE
+    batch_size = Config.BATCH_SIZE
+    start_date = Config.START_DATE  # ignored
+    end_date = Config.END_DATE # ignored
+    time_interval = Config.TIME_INTERVAL 
+    period = Config.PERIOD  
+    num_segments = Config.NUM_SEGMENTS 
+    hidden_dim = Config.HIDDEN_DIM 
+    num_layers = Config.NUM_LAYERS 
+    input_dims = Config.INPUT_DIMS 
 
     if args.train:
 
-        processed_data = fetch_and_preprocess_data(ticker=Ticker, 
-                                                start_date = start_date, 
-                                                end_date = end_date, 
-                                                time_interval = time_interval, 
-                                                period = period, 
-                                                run_dir=run_dir)
+        processed_data = fetch_and_preprocess_data(ticker=Config.TICKER, 
+                                           start_date=Config.START_DATE, 
+                                           end_date=Config.END_DATE, 
+                                           time_interval=Config.TIME_INTERVAL, 
+                                           period=Config.PERIOD, 
+                                           run_dir=Config.Directories.RUN_DIR)
         # Creating the Dataset and DataLoader
         eth_dataset = seqTradeDataset(processed_data, 
                                 window_size=window_size, 
                                 horizon=horizon, 
                                 add_angles=args.add_angle)
-        eth_dataloader = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
-        eth_dataloader_val = DataLoader(eth_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
-        eth_dataloader_test = DataLoader(eth_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate)
+        eth_dataloader = DataLoader(eth_dataset, batch_size=Config.BATCH_SIZE, shuffle=True, collate_fn=collate)
+        eth_dataloader_val = DataLoader(eth_dataset, batch_size=Config.BATCH_SIZE, shuffle=True, collate_fn=collate)
+        # eth_dataloader_test = DataLoader(eth_dataset, batch_size=Config.BATCH_SIZE, shuffle=False, collate_fn=collate)
 
         # 9 is the features size
         # 20 segments 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        checkpoint_path = os.path.join(CHECKPOINT_FOLDER,  f'{Ticker}_checkpoint_{current_datetime}.pth')
+        checkpoint_path = os.path.join(Config.Directories.CHECKPOINT_FOLDER, f'{Config.TICKER}_checkpoint_{current_datetime}.pth')
 
         # Model setups
-        model =  make_model(name=args.model, input_dim=input_dims, hidden_dim=hidden_dim, num_layers=num_layers, num_segments=num_segments, future_timestamps=horizon, device=device) # increase hidden to 32 for bayes
-
+        model = make_model(name=Config.MODEL_NAME, 
+                   input_dim=Config.INPUT_DIMS, 
+                   hidden_dim=Config.HIDDEN_DIM, 
+                   num_layers=Config.NUM_LAYERS, 
+                   num_segments=Config.NUM_SEGMENTS, 
+                   future_timestamps=Config.HORIZON, 
+                   device=device)
+        
         model.train()
 
 
         logging.info("training the model")
-        copy_files(SCRIPTS_FOLDER)
+        copy_files(Config.Directories.SCRIPTS_FOLDER)
         
         train_losses = []
         test_losses = []
-        num_epochs = 2000
+        num_epochs = Config.NUM_EPOCHS
         epoch_range = tqdm(range(num_epochs), desc="Training Progress", ncols=100, ascii=True)
         best_test_loss = float('inf')
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-        loss_fn = LossFunctions('geometric_bayesian_weighted', tb_logger=tb_logger, horizon=horizon)
+        optimizer = torch.optim.Adam(model.parameters(), lr=Config.LEARNING_RATE)
+        loss_fn = LossFunctions(Config.LOSS_FUNCTION, tb_logger=tb_logger, horizon=horizon)
         criterion = loss_fn.get_loss_function()
         trainer = Trainer(model, eth_dataloader, optimizer, criterion, device, tb_logger)
         evaler = Evaler(model, eth_dataloader_val, criterion, device, tb_logger)
@@ -443,7 +512,7 @@ def main(args):
             tb_logger.log_scalar('Loss/train', avg_train_loss, epoch)
             loss_fn.log_losses(epoch, 'train')
             
-            if (epoch + 1) % 200 == 0:
+            if (epoch + 1) % Config.TB_LOG_HISTOGRAM_INTERVAL == 0:
                 # Log histograms of activations
                 for name, module in model.named_modules():
                     if isinstance(module, nn.ReLU):  # Change this to whatever activation your model uses
@@ -496,21 +565,25 @@ def main(args):
         print("done")
 
     elif args.eval:
-        # global run_dir
+        
         logging.info("Testing started")
+
+        # create the default folders and files 
         experiment_location = os.path.join(os.path.dirname(args.checkpoint_path), "..")
-        TESTING_FOLDER = os.path.join(experiment_location, 'testing')
-        TESTING_PLOT_FOLDER = os.path.join(TESTING_FOLDER, "plots")
-        RESULTS_FOLDER = TESTING_FOLDER
+        TESTING_FOLDER = Config.Directories.TESTING_FOLDER
+        TESTING_PLOT_FOLDER = Config.Directories.TESTING_PLOT_FOLDER
+        RESULTS_FOLDER = Config.Directories.RESULTS_FOLDER
         os.makedirs(TESTING_FOLDER, exist_ok=True)
         copy_files(TESTING_FOLDER)
-        tb_log_dir= os.path.join(experiment_location, "tb_logs")
+        tb_log_dir = os.path.join(Config.Directories.TB_LOG_DIR, current_datetime + "_" + added_experiment_name)
+        tb_logger = TensorBoardLogger(tb_log_dir)
+        
+        # getting the topmost log to populate
         log_folder_names = os.listdir(tb_log_dir)
-
-        tblog_experiment_folder = log_folder_names[0]
+        tblog_experiment_folder = sorted(log_folder_names, False)[0]
         tb_dir = os.path.join(tb_log_dir, tblog_experiment_folder)
-        tb_logger = TensorBoardLogger(tb_dir)
-        loss_fn = LossFunctions('geometric_bayesian_weighted', tb_logger=tb_logger, horizon=horizon)
+
+        loss_fn = LossFunctions(Config.LOSS_FUNCTION, tb_logger=tb_logger, horizon=Config.HORIZON)
         criterion = loss_fn.get_loss_function()
         
         run_dir = experiment_location
@@ -535,9 +608,16 @@ def main(args):
         checkpoint_path = os.path.join(CHECKPOINT_FOLDER,  f'{Ticker}_checkpoint_{current_datetime}.pth')
 
         # Model setups
-        model =  make_model(name=args.model, input_dim=input_dims, hidden_dim=hidden_dim, num_layers=num_layers, num_segments=num_segments, future_timestamps=horizon, device=device) # increase hidden to 32 for bayes
-
+        model = make_model(name=Config.MODEL_NAME, 
+                   input_dim=Config.INPUT_DIMS, 
+                   hidden_dim=Config.HIDDEN_DIM, 
+                   num_layers=Config.NUM_LAYERS, 
+                   num_segments=Config.NUM_SEGMENTS, 
+                   future_timestamps=Config.HORIZON, 
+                   device=device)
+        
         model.eval()
+
         # Ensure these directories exist
         os.makedirs(PLOT_FOLDER, exist_ok=True)
         os.makedirs(TESTING_PLOT_FOLDER, exist_ok=True)

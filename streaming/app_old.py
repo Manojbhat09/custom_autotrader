@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import numpy as np
 import random
 import time
-
+import os
 
 auth = AuthManager()
 tickers = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'FB', 'TSLA', 'NFLX', 'SPY', 'BA']  # Your list of tickers
@@ -22,7 +22,8 @@ macd_selected = st.sidebar.checkbox('MACD')
 bollinger_bands_selected = st.sidebar.checkbox('Bollinger Bands')  # Added as an example
 fibonacci_retracements_selected = st.sidebar.checkbox('Fibonacci Retracements')  # Added as an example
 ichimoku_cloud_selected = st.sidebar.checkbox('Ichimoku Cloud')  # Added as an example
-robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
+username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+robinhood_manager = RobinhoodManager(username, password)
 
 def get_robinhood_ticker_lists():
 

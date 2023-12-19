@@ -1,6 +1,8 @@
 from robinhood_manager import RobinhoodManager
 import robin_stocks.robinhood as rh
-manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09@')
+import os 
+username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+manager = RobinhoodManager(username, password)
 
 # Fetch the list of option positions
 option_positions_data = manager.get_my_option_positions()

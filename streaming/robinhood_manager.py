@@ -3,11 +3,13 @@ import robin_stocks.robinhood as rh
 import streamlit as st
 import logging 
 import pandas as pd
+import os
 
 class RobinhoodManager():
     def __init__(self, username, password):
         rh.login(username=username, password=password)
         self.rh = rh
+        
     @st.cache(allow_output_mutation=True)
     def get_watchlist_by_name(self, list_name):
         try:
@@ -376,7 +378,8 @@ class RobinhoodManager():
         return current_data_point
     
 if __name__ == "__main__":
-    manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MENkeys796@09@')
+    username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+    manager = RobinhoodManager(username, password)
     watchlist = manager.get_watchlist_by_name("Tech")
     print(watchlist)  # Should print the symbols in the Tech watchlist
 

@@ -7,11 +7,12 @@ from datetime import datetime
 import random
 from robinhood_manager import RobinhoodManager
 import plotly.express as px
-
+import os
 st.set_page_config(layout="wide")
 # Streamlit layout
 st.title('Piechart portfolio')
-robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
+username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+robinhood_manager = RobinhoodManager(username, password)
 
 def get_seconds_from_interval(interval):
     interval_mapping = {

@@ -15,7 +15,8 @@ import os
 import random
 
 Config=None 
-robinhood_manager = RobinhoodManager(username='manojbhat09@gmail.com', password='MONkeys796@09')
+username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
+robinhood_manager = RobinhoodManager(username, password)
 
 # Function to dynamically import Config from the latest experiment
 def import_latest_experiment_config(run_directory, experiment_name=None):

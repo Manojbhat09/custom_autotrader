@@ -4,13 +4,16 @@ import streamlit as st
 import logging 
 import pandas as pd
 import os
-
+import datetime 
+import dateutil
+from tqdm import tqdm
+import collections
 class RobinhoodManager():
     def __init__(self, username, password):
         rh.login(username=username, password=password)
         self.rh = rh
         
-    @st.cache(allow_output_mutation=True)
+    # @st.cache(allow_output_mutation=True)
     def get_watchlist_by_name(self, list_name):
         try:
             watchlist = rh.get_watchlist_by_name(list_name)
@@ -21,12 +24,12 @@ class RobinhoodManager():
             symbols = []
         return symbols
     
-    @st.cache(allow_output_mutation=True)
+    # @st.cache(allow_output_mutation=True)
     def get_all_watchlists(self):
         all_watchlists = rh.get_all_watchlists()
         return all_watchlists
     
-    @st.cache(allow_output_mutation=True)
+    # @st.cache(allow_output_mutation=True)
     def get_all_unique_symbols(self):
         all_unique_symbols = set()
         try:
@@ -376,29 +379,184 @@ class RobinhoodManager():
                 'Volume': df['volume'].astype(float),
             }
         return current_data_point
+
+    def get_historical_4points_tickers(self, tickers):
+
+        yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).date()
+        data = {}
+        for ticker in tqdm(tickers):
+            historical_data = rh.stocks.get_stock_historicals(ticker, interval='hour', span='week')
+            if historical_data:
+                # Filter for yesterday's data  
+                day_data = [point for point in historical_data if dateutil.parser.isoparse(point['begins_at']).date() == yesterday]
+                if day_data:
+                    opening_price = float(day_data[0]['open_price'])
+                    highest_price = max(float(point['high_price']) for point in day_data)
+                    lowest_price = min(float(point['low_price']) for point in day_data)
+                    closing_price = float(day_data[-1]['close_price'])
+
+                    data[ticker] = {
+                        'opening_price': opening_price,
+                        'highest_price': highest_price,
+                        'lowest_price': lowest_price,
+                        'closing_price': closing_price
+                    }
+
+        return data
     
+    # Stock Information
+    def get_stock_instruments(self, symbol):
+        return self.rh.stocks.get_instruments_by_symbols(symbol)
+
+    def get_stock_historicals(self, symbol, interval, span):
+        return self.rh.stocks.get_stock_historicals(symbol, interval=interval, span=span)
+
+    def get_stock_quote(self, symbol):
+        return self.rh.stocks.get_quotes(symbol)
+    # Additional Stock Methods
+    def get_fundamentals(self, symbol):
+        return self.rh.stocks.get_fundamentals(symbol)
+
+    def get_latest_price(self, symbol):
+        return self.rh.stocks.get_latest_price(symbol)
+    
+    def get_stock_earnings(self, symbol):
+        return self.rh.stocks.get_earnings(symbol)
+
+    def get_stock_splits(self, symbol):
+        return self.rh.stocks.get_splits(symbol)
+
+    def get_stock_news(self, symbol):
+        return self.rh.stocks.get_news(symbol)
+
+    def calculate_scores(self, ticker, stock_data):
+        opening_price = stock_data['opening_price']
+        closing_price = stock_data['closing_price']
+        highest_price = stock_data['highest_price']
+        lowest_price = stock_data['lowest_price']
+
+        scores = {
+            'ticker': ticker, 
+            'Price Range Score': (highest_price - lowest_price) / highest_price,
+            'Closing Position Score': (closing_price - opening_price) / (highest_price - lowest_price) if highest_price != lowest_price else 0,
+            'Directional Movement Score': 1 if closing_price > opening_price else 0,
+            'Normalized Closing Score': (closing_price - lowest_price) / (highest_price - lowest_price) if highest_price != lowest_price else 0,
+            'Intraday Range to Opening Ratio': (highest_price - lowest_price) / opening_price if opening_price != 0 else 0,
+            'End of Day Recovery': 1 - (closing_price - lowest_price) / (opening_price - lowest_price) if opening_price != lowest_price and closing_price < opening_price else 1,
+            'Relative Closing Strength': (closing_price - opening_price) / opening_price if opening_price != 0 else 0,
+            'High-Low Midpoint Relative to Close': 1 - abs((highest_price + lowest_price) / 2 - closing_price) / (highest_price - lowest_price) if highest_price != lowest_price else 0,
+            'Proximity to Opening Price': (closing_price - opening_price) / (highest_price - opening_price) if closing_price >= opening_price and highest_price != opening_price else (closing_price - opening_price) / (opening_price - lowest_price) if opening_price != lowest_price else 0,
+            'Relative High-Low Position': (highest_price - opening_price) / (closing_price - lowest_price) if closing_price != lowest_price else 0,
+            'Closing Reversal Indicator': abs(closing_price - opening_price) / (highest_price - lowest_price) if highest_price != lowest_price else 0,
+            'Intraday Stability Index': 1 - ((highest_price - lowest_price) - abs(closing_price - opening_price)) / (highest_price - lowest_price) if highest_price != lowest_price else 0,
+            'Open-Close Midpoint Deviation': abs(((opening_price + closing_price) / 2) - ((highest_price + lowest_price) / 2)) / (highest_price - lowest_price) if highest_price != lowest_price else 0
+        }
+        # Calculate average score
+        score_list = list(scores.values())[1:]
+        average_score = sum(score_list) / len(score_list)
+        normalized_score = average_score * 10  # Normalizing to a scale of 0-10
+
+        scores['Q'] = normalized_score
+        return scores
+    
+    def get_4point_scores_tickers(self,tickers):
+        # print the 4 poitns of data for each ticker for yesterday 
+        data = self.get_historical_4points_tickers(tickers)
+
+        scores_dict = []
+        for ticker, data in data.items():
+            scores = self.calculate_scores(ticker, data)
+            scores_dict.append(scores)
+
+        return scores_dict
+
+    # def fetch_options_data(self, options_data):
+    #     # Read the CSV file
+    #     options_df = pd.DataFrame(options_data)
+
+    #     # Process the DataFrame as per your requirements
+    #     # For example, selecting specific columns
+    #     processed_data = options_df[['chain_symbol', 'expiration_date', 'strike_price', 'type']]
+
+    #     # Convert to a list of dictionaries if needed
+    #     options_data = processed_data.to_dict(orient='records')
+
+    #     return options_data
+    
+    def get_options_data(self, tickers, option_type=None):
+        options_data = collections.defaultdict(list)
+        for ticker in tqdm(tickers):
+            try:
+                # Use find_tradable_options or find_options_by_strike based on your needs
+                options = self.rh.options.find_tradable_options(ticker, optionType=option_type)
+                for option in tqdm(options):
+                    # Process the option data
+                    market_data = rh.options.get_option_market_data_by_id(option['id'])
+                    if market_data:
+                        option.update(market_data[0])
+                    options_data[ticker].append(option)
+                    import pdb; pdb.set_trace()
+            except Exception as e:
+                print(f"Error fetching options data for {ticker}: {e}")
+        return options_data
+    
+    def get_current_options_data(self, tickers):
+        """
+        Fetches the current options data for the given list of tickers.
+        """
+        options_data = []
+        for ticker in tickers:
+            try:
+                # Fetch options data for the ticker
+                # Note: Replace 'get_options_data' with the actual method name from robin_stocks API
+                ticker_options = self.get_options_data(ticker)
+                for option in ticker_options:
+                    # Process and append data to the options_data list
+                    # Modify the keys according to the actual structure of the response
+                    options_data.append({
+                        'Ticker': ticker,
+                        'Option ID': option['id'],
+                        'Type': option['type'],
+                        'Strike Price': option['strike_price'],
+                        'Expiration Date': option['expiration_date'],
+                        'Current Price': option['current_price']
+                    })
+            except Exception as e:
+                logging.error(f"Error fetching options data for {ticker}: {e}")
+                print(e)
+        return options_data
+
 if __name__ == "__main__":
     username, password = os.environ['RH_USERNAME'], os.environ['RH_PASSWORD']
     manager = RobinhoodManager(username, password)
     watchlist = manager.get_watchlist_by_name("Tech")
     print(watchlist)  # Should print the symbols in the Tech watchlist
 
+    scores_dict = manager.get_4point_scores_tickers(watchlist)
+
+    # Extracting only ticker and Q score for DataFrame
+    data_for_df = [{'Ticker': tickerdata['ticker'], 'Q Score': tickerdata['Q']} for tickerdata in scores_dict]
+    df = pd.DataFrame(data_for_df)
+    print(df)
+    import pdb; pdb.set_trace()
+    
+    
     # Get historical data for a cryptocurrency
-    historical_data = manager.get_crypto_historicals('BTC', '5minute', 'week')
-    print(historical_data)
+    # historical_data = manager.get_crypto_historicals('BTC', '5minute', 'week')
+    # print(historical_data)
 
     # Start streaming crypto data (This would need to be run in an async loop)
     # asyncio.run(manager.stream_crypto_data('BTC'))
 
     # Execute a crypto order
-    order = manager.execute_crypto_order('BTC', 1, 'buy')
-    print(order)
+    # order = manager.execute_crypto_order('BTC', 1, 'buy')
+    # print(order)
 
-    # Calculate profit
-    profit = manager.calculate_profit(50000, 51000, 1)  # Example values
-    print(f"Profit: {profit}")
+    # # Calculate profit
+    # profit = manager.calculate_profit(50000, 51000, 1)  # Example values
+    # print(f"Profit: {profit}")
 
-    # Example: Calculate Sharpe Ratio for a set of returns
-    sample_returns = [0.01, 0.02, -0.01, 0.03, 0.02]
-    sharpe_ratio = manager.calculate_sharpe_ratio(sample_returns)
-    print(f"Sharpe Ratio: {sharpe_ratio}")
+    # # Example: Calculate Sharpe Ratio for a set of returns
+    # sample_returns = [0.01, 0.02, -0.01, 0.03, 0.02]
+    # sharpe_ratio = manager.calculate_sharpe_ratio(sample_returns)
+    # print(f"Sharpe Ratio: {sharpe_ratio}")

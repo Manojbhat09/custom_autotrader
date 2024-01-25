@@ -1,0 +1,151 @@
+2023-12-27 21:13:14 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:13:23 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:13:32 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:13:42 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:13:43 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:14:44 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:14:55 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:14:55 ERROR:No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/dispatcher.py", line 340, in process_update
+    handler.handle_update(update, self, check, context)
+  File "/home/mbhat/anaconda3/envs/tradebot/lib/python3.7/site-packages/telegram/ext/handler.py", line 122, in handle_update
+    return self.callback(dispatcher.bot, update, **optional_args)
+  File "telegram_utils.py", line 40, in handle_message
+    incoming_messages.append(update.message.text)
+AttributeError: 'Bot' object has no attribute 'message'
+2023-12-27 21:15:23 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:15:27 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:15:57 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:16:28 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:16:33 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:20:21 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:20:32 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:21:11 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:21:21 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:21:41 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:22:01 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:23:23 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:24:23 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:26:58 WARNING:Connection pool of Request object is smaller than optimal value (8)
+2023-12-27 21:27:08 WARNING:Connection pool is full, discarding connection: api.telegram.org
+2023-12-27 21:32:53 INFO:polling
+2023-12-27 21:32:58 INFO:polling
+2023-12-27 21:33:08 INFO:found messages
+2023-12-27 21:33:49 INFO:polling
+2023-12-27 21:33:59 INFO:found messages
+2023-12-27 21:34:47 INFO:polling
+2023-12-27 21:34:59 INFO:found messages
+2023-12-27 21:35:31 INFO:polling
+2023-12-27 21:35:37 INFO:found messages
+2023-12-27 21:35:55 INFO:polling
+2023-12-27 21:36:01 INFO:found messages
+2023-12-27 21:36:20 INFO:polling
+2023-12-27 21:36:26 INFO:found messages
